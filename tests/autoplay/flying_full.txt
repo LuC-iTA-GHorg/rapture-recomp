@@ -1,0 +1,40 @@
+# Flying Frenzy, unattended full run (use with --fast 4): intro movies, title,
+# New game (1 player) -> OK, the hero stays idle until the foes take every
+# life (about 2 minutes at --fast 4), initials C L F -> OK, high-score table
+# -> OK, "Play again?" -> No, credits.
+wait 4000
+shot f01_intro
+wait 200000
+shot f02_newgame
+wait 36000
+shot f03_newgame
+click 205 345
+wait 30000
+shot f04_playing
+wait 60000
+shot f05_playing
+wait 140000
+shot f06_name
+click 244 175
+wait 1000
+click 293 225
+wait 1000
+click 393 175
+wait 1000
+shot f07_typed
+click 228 390
+wait 6000
+shot f08_table
+click 228 390
+wait 6000
+shot f09_again
+click 372 282
+wait 4000
+shot f10_after_no
+wait 20000
+shot f11_credits
+wait 30000
+shot f12_credits
+wait 30000
+shot f13_end
+quit
