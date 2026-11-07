@@ -5,6 +5,8 @@
  * lookup function. Only their guest addresses appear here; the code under test
  * is generated at build time from the user's own Shoot.dll.
  *
+ * Also the x87 routines _ftol, _CIsqrt and _CIatan2 of Aaron.dll's CRT.
+ *
  * Usage: test_mushoot_crt GEN_DIR      (GEN_DIR holds the *.bin images)
  */
 #include "recomp.h"
@@ -21,6 +23,11 @@
 #define SHOOT_MEMCPY_B 0x10020be0u
 #define SHOOT_MEMSET  0x100215e0u
 #define SHOOT_CP2LCID 0x100209deu   /* code page -> LCID of the CJK code pages */
+
+/* Aaron.dll guest addresses (base 0x10200000): x87 routines of its static CRT. */
+#define AARON_FTOL    0x10215494u   /* _ftol: st(0) -> edx:eax, truncating */
+#define AARON_CISQRT  0x102154c0u   /* _CIsqrt: st(0) = sqrt(st(0)) */
+#define AARON_CIATAN2 0x1021548au   /* _CIatan2: st(0) = atan2(st(1), st(0)), pops */
 
 #define SCRATCH 0x00200000u        /* guest scratch area */
 #define SCRATCH_SIZE 0x10000u
@@ -41,6 +48,8 @@ static uint32_t call(uint32_t fn, int argc, const uint32_t *argv) {
           "callee-saved registers clobbered by %08x", fn);
     return r;
 }
+
+#define ST_OF(i) (cpu.st[(cpu.top + (i)) & 7u])
 
 static char *g(uint32_t a) { return (char *)rc_ptr(a); }
 
@@ -123,8 +132,41 @@ static void test_cp2lcid(void) {
     }
 }
 
+static void test_x87(void) {
+    const double v[] = {0.0, 0.4, 0.5, 0.6, 1.0, 3.7, -3.7, -0.5, 2.5, -2.5, 123456.999, 1e10, -1e10, 4294967295.0};
+    for (unsigned k = 0; k < sizeof v / sizeof v[0]; k++) {
+        cpu.cw = 0x027F;                     /* round to nearest, as set by the CRT startup */
+        uint32_t top = cpu.top;
+        fpush(&cpu, v[k]);
+        call(AARON_FTOL, 0, NULL);
+        int64_t got = (int64_t)(((uint64_t)cpu.edx << 32) | cpu.eax);
+        CHECK(got == (int64_t)v[k], "_ftol(%g) = %lld", v[k], (long long)got);
+        CHECK(cpu.cw == 0x027F && cpu.top == top, "_ftol(%g) did not restore cw/stack", v[k]);
+    }
+    const double s[] = {0.0, 1.0, 2.0, 0.25, 1e6, 12345.678};
+    for (unsigned k = 0; k < sizeof s / sizeof s[0]; k++) {
+        uint32_t top = cpu.top;
+        fpush(&cpu, s[k]);
+        call(AARON_CISQRT, 0, NULL);
+        CHECK(ST_OF(0) == sqrt(s[k]), "_CIsqrt(%g) = %.17g", s[k], ST_OF(0));
+        fpop(&cpu);
+        CHECK(cpu.top == top, "_CIsqrt stack");
+    }
+    const double yx[][2] = {{1, 1}, {-1, 1}, {1, -1}, {-1, -1}, {0, 1}, {3, 0}, {-30, 40}};
+    for (unsigned k = 0; k < sizeof yx / sizeof yx[0]; k++) {
+        uint32_t top = cpu.top;
+        fpush(&cpu, yx[k][0]);
+        fpush(&cpu, yx[k][1]);
+        call(AARON_CIATAN2, 0, NULL);
+        CHECK(fabs(ST_OF(0) - atan2(yx[k][0], yx[k][1])) < 1e-15, "_CIatan2(%g, %g) = %.17g", yx[k][0], yx[k][1], ST_OF(0));
+        fpop(&cpu);
+        CHECK(cpu.top == top, "_CIatan2 stack");
+    }
+}
+
 int main(int argc, char **argv) {
     const char *gen = argc > 1 ? argv[1] : ".";
+    rc_trace = getenv("RC_TRACE") != NULL;
     if (rc_init()) { printf("cannot reserve guest memory\n"); return 2; }
     for (uint32_t k = 0; k < rc_module_count; k++) {
         char path[1024];
@@ -143,6 +185,7 @@ int main(int argc, char **argv) {
     test_mem(SHOOT_MEMCPY_B, "memcpy_b");
     test_memset();
     test_cp2lcid();
+    test_x87();
     printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

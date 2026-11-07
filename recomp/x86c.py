@@ -171,6 +171,13 @@ class Translator:
         if mn.startswith(("rep ", "repe ", "repne ", "repz ", "repnz ")):
             prefix, mn = mn.split(" ", 1)
 
+        if mn.startswith("lock "):
+            mn = mn[5:]   # single-threaded guest: the lock prefix changes nothing
+        if mn[0] == "f" or mn == "wait":
+            return self.x87(i, mn)
+        if mn == "xlatb":
+            return [self.reg_write("al", "rd8(c->ebx + (uint8_t)c->eax)")]
+
         if prefix or mn in ("stosb", "stosw", "stosd", "movsb", "movsw", "movsd",
                             "scasb", "scasd", "cmpsb", "cmpsd", "lodsb", "lodsd"):
             return self.string_op(i, prefix, mn)
@@ -242,6 +249,10 @@ class Translator:
             return [self.wr(i, ops[0], f"({CC[mn[3:]]}) ? 1 : 0")]
         if mn in ("cld", "std"):
             return [f"c->df = {1 if mn == 'std' else 0};"]
+        if mn == "sahf":
+            return ["{ uint32_t h = c->eax >> 8; cf = h & 1; pf = (h >> 2) & 1; zf = (h >> 6) & 1; sf = (h >> 7) & 1; }"]
+        if mn == "lahf":
+            return [self.reg_write("ah", "(sf << 7) | (zf << 6) | (pf << 2) | 2u | cf")]
         if mn in ("clc", "stc", "cmc"):
             return [{"clc": "cf = 0;", "stc": "cf = 1;", "cmc": "cf ^= 1;"}[mn]]
         if mn in ("int3", "hlt", "ud2"):
@@ -356,12 +367,13 @@ class Translator:
             body = (f"int64_t sa = ({STYPE[n]})a; r = (uint32_t)(sa >> k) & {M}; cf = (uint32_t)(sa >> (k - 1)) & 1; of = 0; "
                     + self.szp(n))
         else:
-            if n != 4:
-                raise Unsupported("narrow rotate")
+            kk = f"(k % {N}u)"
             if mn == "rol":
-                body = "r = (a << k) | (a >> ((32 - k) & 31)); cf = r & 1; of = ((r >> 31) ^ cf) & 1;"
+                body = (f"uint32_t q = {kk}; r = q ? ((a << q) | (a >> ({N}u - q))) & {M} : a; cf = r & 1; "
+                        f"of = ((r >> {N - 1}) ^ cf) & 1;")
             else:
-                body = "r = (a >> k) | (a << ((32 - k) & 31)); cf = r >> 31; of = ((r >> 31) ^ (r >> 30)) & 1;"
+                body = (f"uint32_t q = {kk}; r = q ? ((a >> q) | (a << ({N}u - q))) & {M} : a; cf = (r >> {N - 1}) & 1; "
+                        f"of = ((r >> {N - 1}) ^ (r >> {N - 2})) & 1;")
         return [head + body + " " + self.wr(i, d, "r", ea_ref) + " } }"]
 
     def imul(self, i) -> list[str]:
@@ -406,3 +418,113 @@ class Translator:
             return [f"while (c->ecx) {{ {one} c->ecx--; }}"]
         stop = "if (!zf) break;" if prefix in ("repe", "repz", "rep") else "if (zf) break;"
         return [f"while (c->ecx) {{ {one} c->ecx--; {stop} }}"]
+
+    # -- x87 -------------------------------------------------------------
+    def _st(self, i, op) -> int:
+        name = i.reg_name(op.reg)
+        if not name.startswith("st"):
+            raise Unsupported(f"x87 operand {name}")
+        return int(name[3]) if "(" in name else 0
+
+    def _fmem_rd(self, i, op, integer: bool) -> str:
+        e = self.ea(i, op)
+        if integer:
+            t = {2: "(int16_t)rd16", 4: "(int32_t)rd32", 8: "(int64_t)rd64"}.get(op.size)
+            if not t:
+                raise Unsupported("x87 integer size")
+            return f"(double){t}({e})"
+        if op.size == 4:
+            return f"(double)rdf32({e})"
+        if op.size == 8:
+            return f"rdf64({e})"
+        if op.size == 10:
+            return f"rdf80({e})"
+        raise Unsupported("x87 memory operand size")
+
+    def x87(self, i, mn) -> list[str]:
+        ops = i.operands
+        if mn in ("wait", "fwait", "fnop", "fninit", "finit"):
+            return [] if mn not in ("fninit", "finit") else ["c->cw = 0x37F; c->sw = 0; c->top = 0;"]
+        if mn == "fnclex":
+            return ["c->sw &= 0x7F00u;"]
+        if mn == "fldcw":
+            return [f"c->cw = rd16({self.ea(i, ops[0])});"]
+        if mn == "fnstcw":
+            return [f"wr16({self.ea(i, ops[0])}, c->cw);"]
+        if mn == "fnstsw":
+            if ops[0].type == X.X86_OP_REG:
+                return [self.reg_write("ax", "fstsw(c)")]
+            return [f"wr16({self.ea(i, ops[0])}, fstsw(c));"]
+        consts = {"fldz": "0.0", "fld1": "1.0", "fldpi": "3.14159265358979323846",
+                  "fldl2e": "1.44269504088896340736", "fldl2t": "3.32192809488736234787",
+                  "fldlg2": "0.30102999566398119521", "fldln2": "0.69314718055994530942"}
+        if mn in consts:
+            return [f"fpush(c, {consts[mn]});"]
+        if mn in ("fld", "fild"):
+            op = ops[0]
+            if op.type == X.X86_OP_REG:
+                return [f"{{ double v = ST({self._st(i, op)}); fpush(c, v); }}"]
+            return [f"fpush(c, {self._fmem_rd(i, op, mn == 'fild')});"]
+        if mn in ("fst", "fstp"):
+            op = ops[0]
+            pop = " fpop(c);" if mn == "fstp" else ""
+            if op.type == X.X86_OP_REG:
+                return [f"ST({self._st(i, op)}) = ST(0);{pop}"]
+            e = self.ea(i, op)
+            if op.size == 4:
+                return [f"wrf32({e}, (float)ST(0));{pop}"]
+            if op.size == 8:
+                return [f"wrf64({e}, ST(0));{pop}"]
+            if op.size == 10:
+                return [f"wrf80({e}, ST(0));{pop}"]
+            raise Unsupported("x87 store size")
+        if mn in ("fist", "fistp"):
+            op = ops[0]
+            pop = " fpop(c);" if mn == "fistp" else ""
+            b = op.size * 8
+            w = {16: "wr16", 32: "wr32", 64: "wr64"}[b]
+            return [f"{w}({self.ea(i, op)}, ({UTYPE.get(op.size, 'uint64_t')})rc_fist(c, ST(0), {b}));{pop}"]
+        if mn == "fxch":
+            k = self._st(i, ops[0]) if ops else 1
+            return [f"{{ double t = ST(0); ST(0) = ST({k}); ST({k}) = t; }}"]
+        if mn in ("fchs", "fabs", "fsqrt", "frndint"):
+            f = {"fchs": "-ST(0)", "fabs": "fabs(ST(0))", "fsqrt": "sqrt(ST(0))", "frndint": "rc_fround(c, ST(0))"}[mn]
+            return [f"ST(0) = {f};"]
+        if mn == "fxam":
+            return ["rc_fxam(c);"]
+        if mn == "ftst":
+            return ["fcmp(c, ST(0), 0.0);"]
+        if mn == "fscale":
+            return ["ST(0) = ldexp(ST(0), (int)trunc(ST(1)));"]
+        if mn == "fpatan":
+            return ["ST(1) = atan2(ST(1), ST(0)); fpop(c);"]
+        if mn in ("fsin", "fcos"):
+            return [f"ST(0) = {mn[1:]}(ST(0));"]
+        if mn in ("fcom", "fcomp", "fcompp", "fucom", "fucomp", "fucompp", "ficom", "ficomp"):
+            npop = 2 if mn.endswith("pp") else 1 if mn.endswith("p") else 0
+            if ops and ops[0].type == X.X86_OP_MEM:
+                b = self._fmem_rd(i, ops[0], mn.startswith("fi"))
+            else:
+                b = f"ST({self._st(i, ops[0]) if ops else 1})"
+            return [f"fcmp(c, ST(0), {b});" + " fpop(c);" * npop]
+        base = mn.rstrip("p") if mn not in ("fsubp", "fsubrp", "fdivp", "fdivrp", "faddp", "fmulp") else mn[:-1]
+        if base.startswith("fi") and base[2:] in ("add", "sub", "subr", "mul", "div", "divr"):
+            integer, opname = True, base[2:]
+        elif base[1:] in ("add", "sub", "subr", "mul", "div", "divr"):
+            integer, opname = False, base[1:]
+        else:
+            raise Unsupported("x87 mnemonic")
+        pop = mn.endswith("p") and not integer
+        expr = {"add": "{d} + {s}", "sub": "{d} - {s}", "subr": "{s} - {d}",
+                "mul": "{d} * {s}", "div": "{d} / {s}", "divr": "{s} / {d}"}[opname]
+        if len(ops) == 1 and ops[0].type == X.X86_OP_MEM:
+            s_ = self._fmem_rd(i, ops[0], integer)
+            return [f"ST(0) = {expr.format(d='ST(0)', s=s_)};"]
+        if len(ops) == 0:            # faddp etc. without operands = st(1), st(0)
+            di, si = 1, 0
+        elif len(ops) == 1:
+            di, si = (self._st(i, ops[0]), 0) if pop else (0, self._st(i, ops[0]))
+        else:
+            di, si = self._st(i, ops[0]), self._st(i, ops[1])
+        out = f"ST({di}) = {expr.format(d=f'ST({di})', s=f'ST({si})')};"
+        return [out + (" fpop(c);" if pop else "")]

@@ -18,7 +18,8 @@ Updated: 2026-11-07 (first session).
     `report.txt` to the build directory. Cross-guest imports resolved statically, system
     imports get thunk addresses 0xFFF00000 + 16n.
 * `runtime/`: guest memory (4 GiB reserve), stack, image loading, `rc_call` dispatch
-  (binary search), `rc_invoke`, faults.
+  (binary search), `rc_invoke`, faults, x87 helpers; `rc_trace` (test: env `RC_TRACE=1`)
+  logs every indirect call.
 * `configs/mushoot.toml`: bases exe 0x400000, Shoot.dll 0x10000000, moses 0x10100000,
   Aaron 0x10200000.
 * MuShoot numbers (session 2): shoot.exe 680 functions / 41 jump tables, shoot.dll 1174 / 40,
@@ -56,8 +57,18 @@ cmake --build build && build\test_mushoot_crt build\gen
    functions), candidates rejected if their body has instructions MSVC never emits or they
    start inside an accepted function; the exe (no relocations) scans aligned data dwords
    and bounds jump tables by distance.
-2. **x87 subset** (`fld/fst/fstp/fild/fistp/fadd/fsub/fmul/fdiv/fcomp/fnstsw/sahf/fldcw/
-   fchs/fabs/fxch`): an 8-entry `double` stack in `CPU`, control/status word.
+2. ~~x87 subset~~ (done, session 2): 8 `double` registers + TOP in `CPU`, status word
+   condition codes (fcom/fxam/ftst, fnstsw, sahf/lahf), control word (fldcw/fnstcw,
+   rounding for fist/frndint), m32/m64/m80 loads and stores (80-bit converted in
+   software), arithmetic in all forms, fpatan/fscale/fsqrt. Also xlatb, narrow rotates,
+   `lock` prefix. **0 unsupported instructions** left in the 4 MuShoot modules.
+   Tests: Aaron.dll `_ftol` (rounding mode switch, edx:eax, cw restored) and `_CIsqrt` pass.
+   **Open: `_CIatan2` (0x1021548a) fails for x < 0 and for x = 0** (3 cases in
+   `test_x87`): the handler 0x102175ac is reached (RC_TRACE=1 shows it) but the sign/
+   quadrant fix-up is wrong. Suspects: the `fxam` C1 bit as read back by `fnstsw m16`
+   + `shl/sar/rol ch` (check which byte of the status word lands in cl/ch), or the
+   x = 0 handler 0x10217605/0x10217996 (`fstp st(0)` pops). Debug by printing ecx and
+   ST(0..1) at the handler entry (edit the generated file in build/, not the generator).
 3. **Direct import calls**: `call [IAT]` where the slot is a guest export -> direct C call
    (now goes through `rc_call`).
 4. **Differential testing with Unicorn** (`pip install unicorn`): run the same guest function

@@ -1,6 +1,7 @@
 /* rapture-recomp runtime: guest memory, dispatch, faults. */
 #include "recomp.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <windows.h>
@@ -51,7 +52,10 @@ rc_fn rc_lookup(uint32_t target) {
     return NULL;
 }
 
+int rc_trace;   /* set by the host (e.g. from an environment variable) to log indirect calls */
+
 void rc_call(CPU *c, uint32_t target) {
+    if (rc_trace) fprintf(stderr, "rc: call %08x esp=%08x\n", target, c->esp);
     rc_fn fn = rc_lookup(target);
     if (fn) { fn(c); return; }
     if (target >= RC_THUNK_BASE && target < RC_THUNK_BASE + rc_import_count * 16u) {
@@ -82,4 +86,58 @@ void rc_fault(CPU *c, uint32_t addr, const char *what) {
 void rc_unimpl(CPU *c, uint32_t addr, const char *insn) {
     fprintf(stderr, "rc: unimplemented instruction at %08x: %s\n", addr, insn);
     rc_fault(c, addr, "unimplemented instruction");
+}
+
+/* -- x87 --------------------------------------------------------------- */
+double rc_fround(CPU *c, double v) {
+    switch ((c->cw >> 10) & 3u) {
+    case 0: return nearbyint(v);    /* host default rounding = to nearest even */
+    case 1: return floor(v);
+    case 2: return ceil(v);
+    default: return trunc(v);
+    }
+}
+
+int64_t rc_fist(CPU *c, double v, int bits) {
+    double r = rc_fround(c, v);
+    double lim = ldexp(1.0, bits - 1);
+    if (!(r >= -lim && r < lim)) return bits == 64 ? INT64_MIN : -((int64_t)1 << (bits - 1));  /* 0x80..0 */
+    return (int64_t)r;
+}
+
+void rc_fxam(CPU *c) {
+    double v = ST(0);
+    uint16_t cc;                      /* C3 C2 C0 */
+    if (v != v) cc = 0x0100u;         /* NaN */
+    else if (isinf(v)) cc = 0x0500u;  /* infinity */
+    else if (v == 0) cc = 0x4000u;    /* zero */
+    else cc = 0x0400u;                /* normal */
+    if (signbit(v)) cc |= 0x0200u;    /* C1 = sign */
+    c->sw = (uint16_t)((c->sw & ~0x4700u) | cc);
+}
+
+double rdf80(uint32_t a) {
+    uint64_t mant = rd64(a);
+    uint16_t se = rd16(a + 8);
+    int neg = se >> 15, e = se & 0x7FFF;
+    double v;
+    if (e == 0x7FFF) v = (mant << 1) ? NAN : INFINITY;
+    else if (e == 0 && mant == 0) v = 0.0;
+    else v = ldexp((double)mant, e - 16383 - 63);
+    return neg ? -v : v;
+}
+
+void wrf80(uint32_t a, double v) {
+    uint16_t se = signbit(v) ? 0x8000u : 0;
+    uint64_t mant = 0;
+    if (isnan(v)) { se |= 0x7FFF; mant = 0xC000000000000000ull; }
+    else if (isinf(v)) { se |= 0x7FFF; mant = 0x8000000000000000ull; }
+    else if (v != 0) {
+        int e;
+        double m = frexp(fabs(v), &e);           /* m in [0.5, 1) */
+        mant = (uint64_t)ldexp(m, 64);
+        se |= (uint16_t)(e - 1 + 16383);
+    }
+    wr64(a, mant);
+    wr16(a + 8, se);
 }
