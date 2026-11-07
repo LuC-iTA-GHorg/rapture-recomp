@@ -1,0 +1,47 @@
+# rapture-recomp config for Disney's Flounder Quest (2000).
+# Only file names, guest bases and addresses: no code or data of the game.
+# The user's original files are read from --game-dir at build time.
+
+game = "flounder"
+title = "Flounder Quest"
+# Settings (the registry of the original) are kept in %APPDATA%\<settings>.
+settings = "FlounderQuest/flounder-recomp.ini"
+
+# Guest bases. quest.dll, moses.dll and Aaron.dll all prefer 0x10000000,
+# so the recompiler rebases moses and Aaron statically.
+[[module]]
+file = "Quest.exe"
+base = "0x00400000"
+
+[[module]]
+file = "quest.dll"
+base = "0x10000000"
+
+[[module]]
+file = "moses.dll"
+base = "0x10100000"
+
+[[module]]
+file = "Aaron.dll"
+base = "0x10200000"
+
+# Function entries the discovery pass cannot find on its own (none yet).
+[extra_functions]
+
+# Differential test (tools/difftest.py): functions whose differences are
+# expected (Aaron.dll CRT x87 helpers, the same as in configs/mushoot.toml).
+[difftest]
+known_differences = ["0x102179cd", "0x102179cf", "0x102179f7", "0x1021aef1", "0x1021aeff", "0x1021af31"]
+
+# VC6 small-block allocator of each module's static CRT (__sbh_alloc_block):
+# made to fail so that every allocation reaches the Win32 layer's heap, which
+# keeps freed blocks intact for a while (see configs/mushoot.toml).
+# moses.dll, Aaron.dll and the exe's CRT are at the same addresses as in MuShoot.
+[replace."Quest.exe"]
+"0x0041235f" = "return0_cdecl"
+[replace."quest.dll"]
+"0x1002045f" = "return0_cdecl"
+[replace."moses.dll"]
+"0x1000e21d" = "return0_cdecl"
+[replace."Aaron.dll"]
+"0x10015ddd" = "return0_cdecl"
