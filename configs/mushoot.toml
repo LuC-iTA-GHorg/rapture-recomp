@@ -1,0 +1,26 @@
+# rapture-recomp config for Disney's MuShoot (1999).
+# Only file names, guest bases and addresses: no code or data of the game.
+# The user's original files are read from --game-dir at build time.
+
+game = "mushoot"
+
+# Guest bases. Shoot.dll, moses.dll and Aaron.dll all prefer 0x10000000,
+# so the recompiler rebases moses and Aaron statically.
+[[module]]
+file = "Shoot.exe"
+base = "0x00400000"
+
+[[module]]
+file = "Shoot.dll"
+base = "0x10000000"
+
+[[module]]
+file = "moses.dll"
+base = "0x10100000"
+
+[[module]]
+file = "Aaron.dll"
+base = "0x10200000"
+
+# Function entries the discovery pass cannot find on its own (none yet).
+[extra_functions]

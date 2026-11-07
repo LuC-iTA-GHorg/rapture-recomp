@@ -1,0 +1,20 @@
+# Build output: generated C and rebased images derived from the user's game files.
+/build*/
+/gen/
+*.o
+*.obj
+*.a
+*.exe
+*.bin
+__pycache__/
+*.pyc
+build.log
+
+# Never commit game files.
+*.dll
+*.rrs
+*.avi
+*.hlp
+*.DLL
+*.EXE
+*.RRS
