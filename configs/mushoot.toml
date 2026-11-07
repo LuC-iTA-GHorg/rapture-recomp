@@ -24,3 +24,10 @@ base = "0x10200000"
 
 # Function entries the discovery pass cannot find on its own (none yet).
 [extra_functions]
+
+# Differential test (tools/difftest.py): functions whose differences are
+# expected. Aaron.dll CRT math helpers that read empty x87 registers (Unicorn
+# yields the "indefinite" NaN of a stack underflow) or read/clear the x87
+# exception flags, which the recompiler does not model.
+[difftest]
+known_differences = ["0x102179cd", "0x102179cf", "0x102179f7", "0x1021aef1", "0x1021aeff", "0x1021af31"]

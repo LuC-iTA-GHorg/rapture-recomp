@@ -18,15 +18,17 @@ typedef struct CPU {
     uint32_t eax, ecx, edx, ebx, esp, ebp, esi, edi;
     uint32_t df;        /* direction flag */
     uint32_t fs_base;   /* guest address of the TEB (fs:[0] = SEH chain) */
-    /* x87: 8 registers as double (the games never need 80-bit precision),
+    /* x87: 8 registers as 80-bit long double (exact on x86-64 GCC),
        st(i) = st[(top + i) & 7]. sw holds the condition codes C0..C3 (bits 8,
-       9, 10, 14); TOP is merged in on fnstsw. cw: rounding control in bits 10-11. */
-    double st[8];
+       9, 10, 14); TOP is merged in on fnstsw. cw: precision control in bits
+       8-9, rounding control in bits 10-11. Exception flags are not modelled. */
+    long double st[8];
     uint32_t top;
     uint16_t sw, cw;
 } CPU;
 
 typedef void (*rc_fn)(CPU *c);
+typedef long double f80;
 
 extern uint8_t *rc_mem;
 
@@ -47,10 +49,21 @@ static inline void wr64(uint32_t a, uint64_t v) { memcpy(rc_mem + a, &v, 8); }
 
 /* -- x87 helpers ------------------------------------------------------ */
 #define ST(i) (c->st[(c->top + (i)) & 7u])
-static inline void fpush(CPU *c, double v) { c->top = (c->top - 1u) & 7u; c->st[c->top] = v; }
+static inline void fpush(CPU *c, f80 v) { c->top = (c->top - 1u) & 7u; c->st[c->top] = v; }
 static inline void fpop(CPU *c) { c->top = (c->top + 1u) & 7u; }
+/* Round an arithmetic result to the precision selected by cw (24/53/64 bits).
+   The host computes in long double with round-to-nearest; the double rounding
+   this implies for directed rounding modes is ignored. */
+static inline f80 rc_fprec(const CPU *c, f80 v) {
+    switch ((c->cw >> 8) & 3u) {
+    case 0: return (f80)(float)v;
+    case 2: return (f80)(double)v;
+    default: return v;
+    }
+}
+#define FPREC(x) rc_fprec(c, (x))
 /* fcom: C3 C2 C0 = 000 (>), 001 (<), 100 (=), 111 (unordered). */
-static inline void fcmp(CPU *c, double a, double b) {
+static inline void fcmp(CPU *c, f80 a, f80 b) {
     uint16_t cc;
     if (a != a || b != b) cc = 0x4500u;
     else if (a < b) cc = 0x0100u;
@@ -59,12 +72,11 @@ static inline void fcmp(CPU *c, double a, double b) {
     c->sw = (uint16_t)((c->sw & ~0x4700u) | cc);
 }
 static inline uint16_t fstsw(CPU *c) { return (uint16_t)((c->sw & ~0x3800u) | ((c->top & 7u) << 11)); }
-/* Round to integer with the rounding control of cw. */
-double rc_fround(CPU *c, double v);
-double rdf80(uint32_t a);              /* 80-bit extended <-> double */
-void wrf80(uint32_t a, double v);
+static inline f80 rdf80(uint32_t a) { f80 v = 0; memcpy(&v, rc_mem + a, 10); return v; }
+static inline void wrf80(uint32_t a, f80 v) { memcpy(rc_mem + a, &v, 10); }
+f80 rc_fround(CPU *c, f80 v);                  /* round to integer with cw's rounding control */
 void rc_fxam(CPU *c);
-int64_t rc_fist(CPU *c, double v, int bits);   /* integer-indefinite on overflow */
+int64_t rc_fist(CPU *c, f80 v, int bits);      /* integer-indefinite on overflow */
 
 /* Host pointer <-> guest address. */
 static inline void *rc_ptr(uint32_t a) { return rc_mem + a; }

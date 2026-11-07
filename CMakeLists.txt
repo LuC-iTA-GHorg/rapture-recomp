@@ -43,3 +43,7 @@ target_link_libraries(test_mushoot_crt PRIVATE game_gen)
 
 enable_testing()
 add_test(NAME mushoot_crt COMMAND test_mushoot_crt "${GEN_DIR}")
+
+# Differential test runner (driven by tools/difftest.py, which needs unicorn).
+add_executable(difftest tests/difftest.c)
+target_link_libraries(difftest PRIVATE game_gen)

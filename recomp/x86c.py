@@ -465,11 +465,11 @@ class Translator:
             t = {2: "(int16_t)rd16", 4: "(int32_t)rd32", 8: "(int64_t)rd64"}.get(op.size)
             if not t:
                 raise Unsupported("x87 integer size")
-            return f"(double){t}({e})"
+            return f"(f80){t}({e})"
         if op.size == 4:
-            return f"(double)rdf32({e})"
+            return f"(f80)rdf32({e})"
         if op.size == 8:
-            return f"rdf64({e})"
+            return f"(f80)rdf64({e})"
         if op.size == 10:
             return f"rdf80({e})"
         raise Unsupported("x87 memory operand size")
@@ -488,15 +488,15 @@ class Translator:
             if ops[0].type == X.X86_OP_REG:
                 return [self.reg_write("ax", "fstsw(c)")]
             return [f"wr16({self.ea(i, ops[0])}, fstsw(c));"]
-        consts = {"fldz": "0.0", "fld1": "1.0", "fldpi": "3.14159265358979323846",
-                  "fldl2e": "1.44269504088896340736", "fldl2t": "3.32192809488736234787",
-                  "fldlg2": "0.30102999566398119521", "fldln2": "0.69314718055994530942"}
+        consts = {"fldz": "0.0L", "fld1": "1.0L", "fldpi": "3.14159265358979323846264338327950288L",
+                  "fldl2e": "1.44269504088896340735992468100189214L", "fldl2t": "3.32192809488736234787031942948939018L",
+                  "fldlg2": "0.301029995663981195213738894724493027L", "fldln2": "0.693147180559945309417232121458176568L"}
         if mn in consts:
             return [f"fpush(c, {consts[mn]});"]
         if mn in ("fld", "fild"):
             op = ops[0]
             if op.type == X.X86_OP_REG:
-                return [f"{{ double v = ST({self._st(i, op)}); fpush(c, v); }}"]
+                return [f"{{ f80 v = ST({self._st(i, op)}); fpush(c, v); }}"]
             return [f"fpush(c, {self._fmem_rd(i, op, mn == 'fild')});"]
         if mn in ("fst", "fstp"):
             op = ops[0]
@@ -507,7 +507,7 @@ class Translator:
             if op.size == 4:
                 return [f"wrf32({e}, (float)ST(0));{pop}"]
             if op.size == 8:
-                return [f"wrf64({e}, ST(0));{pop}"]
+                return [f"wrf64({e}, (double)ST(0));{pop}"]
             if op.size == 10:
                 return [f"wrf80({e}, ST(0));{pop}"]
             raise Unsupported("x87 store size")
@@ -519,20 +519,20 @@ class Translator:
             return [f"{w}({self.ea(i, op)}, ({UTYPE.get(op.size, 'uint64_t')})rc_fist(c, ST(0), {b}));{pop}"]
         if mn == "fxch":
             k = self._st(i, None)
-            return [f"{{ double t = ST(0); ST(0) = ST({k}); ST({k}) = t; }}"]
+            return [f"{{ f80 t = ST(0); ST(0) = ST({k}); ST({k}) = t; }}"]
         if mn in ("fchs", "fabs", "fsqrt", "frndint"):
-            f = {"fchs": "-ST(0)", "fabs": "fabs(ST(0))", "fsqrt": "sqrt(ST(0))", "frndint": "rc_fround(c, ST(0))"}[mn]
+            f = {"fchs": "-ST(0)", "fabs": "fabsl(ST(0))", "fsqrt": "FPREC(sqrtl(ST(0)))", "frndint": "rc_fround(c, ST(0))"}[mn]
             return [f"ST(0) = {f};"]
         if mn == "fxam":
             return ["rc_fxam(c);"]
         if mn == "ftst":
             return ["fcmp(c, ST(0), 0.0);"]
         if mn == "fscale":
-            return ["ST(0) = ldexp(ST(0), (int)trunc(ST(1)));"]
+            return ["ST(0) = ldexpl(ST(0), (int)truncl(ST(1)));"]
         if mn == "fpatan":
-            return ["ST(1) = atan2(ST(1), ST(0)); fpop(c);"]
+            return ["ST(1) = atan2l(ST(1), ST(0)); fpop(c);"]
         if mn in ("fsin", "fcos"):
-            return [f"ST(0) = {mn[1:]}(ST(0));"]
+            return [f"ST(0) = {mn[1:]}l(ST(0));"]
         if mn in ("fcom", "fcomp", "fcompp", "fucom", "fucomp", "fucompp", "ficom", "ficomp"):
             npop = 2 if mn.endswith("pp") else 1 if mn.endswith("p") else 0
             if ops and ops[0].type == X.X86_OP_MEM:
@@ -552,11 +552,11 @@ class Translator:
                 "mul": "{d} * {s}", "div": "{d} / {s}", "divr": "{s} / {d}"}[opname]
         if len(ops) == 1 and ops[0].type == X.X86_OP_MEM:
             s_ = self._fmem_rd(i, ops[0], integer)
-            return [f"ST(0) = {expr.format(d='ST(0)', s=s_)};"]
+            return [f"ST(0) = FPREC({expr.format(d='ST(0)', s=s_)});"]
         k = self._sti(i)
         if k is None:
             raise Unsupported("x87 arithmetic form")
         # D8: st(0) = st(0) op st(i); DC/DE: st(i) = st(i) op st(0) (DE pops).
         di, si = (0, k) if i.bytes[-2] == 0xD8 else (k, 0)
-        out = f"ST({di}) = {expr.format(d=f'ST({di})', s=f'ST({si})')};"
+        out = f"ST({di}) = FPREC({expr.format(d=f'ST({di})', s=f'ST({si})')});"
         return [out + (" fpop(c);" if pop else "")]

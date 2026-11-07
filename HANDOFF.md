@@ -1,6 +1,6 @@
 # HANDOFF
 
-Updated: 2026-11-07 (second session: steps 1 and 2 done).
+Updated: 2026-11-07 (third session: steps 3 and 4 done, Win32 layer next).
 
 ## State
 
@@ -67,11 +67,22 @@ cmake --build build && build\test_mushoot_crt build\gen
    **capstone 5 pitfall**: its x87 register operands are wrong (`fxch st(1)` reports
    operand `st(0)`); `x86c.py` takes st(i) from the ModRM byte and the destination from
    the opcode (D8: st(0); DC/DE: st(i)). Mnemonics (fsub vs fsubr) are correct.
-3. **Direct import calls**: `call [IAT]` where the slot is a guest export -> direct C call
-   (now goes through `rc_call`).
-4. **Differential testing with Unicorn** (`pip install unicorn`): run the same guest function
-   in Unicorn and in the recompiled code on random inputs, compare registers + memory.
-   This scales tests beyond the CRT without hand-written oracles.
+   Session 3: the x87 registers are now `long double` (exact 80-bit on x86-64 GCC) with
+   the precision control of cw applied to arithmetic results (`FPREC`).
+3. ~~Direct import calls~~ (done, session 3): `call/jmp [IAT slot]` -> direct C call of the
+   guest export, or `rc_call_import(c, idx)` for system imports, resolved lazily by name in
+   the HLE tables (`rc_hle_tables`, `win32/`). `rc_host_thunk(fn, name)` hands out guest
+   addresses for host functions (COM vtables, GetProcAddress). `dispatch.c` now also has
+   `rc_export_table` and the module entry points.
+4. ~~Differential testing with Unicorn~~ (done, session 3): `tools/difftest.py` + the
+   `difftest` runner. Selects the self-contained functions (call closure without system
+   imports or non-table indirect calls: ~700), random states, keeps those Unicorn finishes
+   cleanly, compares registers, scratch, stack window and module images (CRC32).
+   Result: **all agree** except 6 known CRT math helpers (empty x87 registers, x87
+   exception flags), listed in `configs/mushoot.toml` `[difftest]`.
+   ```
+   python tools/difftest.py configs/mushoot.toml --game-dir DIR --gen build/gen --runner build/difftest.exe --cases 16
+   ```
 5. **Win32 layer** (C, in `runtime/win32/`), order: KERNEL32 heap/env/locale for the CRT
    startup (`_DllMainCRTStartup` of each module) -> USER32 window + message loop -> GDI
    DIB sections + BitBlt -> WINMM mmio/time -> registry/ini -> DirectSound/MIDI (or HLE of
