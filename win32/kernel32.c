@@ -440,9 +440,18 @@ static void k_GetStringTypeW(CPU *c) {
     RET(4, GetStringTypeW(ARG(0), (LPCWSTR)GP(ARG(1)), (int)ARG(2), (LPWORD)GP(ARG(3))));
 }
 static void k_lstrlenA(CPU *c) { RET(1, ARG(0) ? strlen((const char *)G(ARG(0))) : 0); }
-static void k_lstrcpyA(CPU *c) { strcpy((char *)G(ARG(0)), (const char *)G(ARG(1))); RET(2, ARG(0)); }
+static void k_lstrcpyA(CPU *c) {
+    const char *src = (const char *)G(ARG(1));
+    memmove(G(ARG(0)), src, strlen(src) + 1);   /* guest buffers: memmove, as overlap is possible */
+    RET(2, ARG(0));
+}
 static void k_lstrcpynA(CPU *c) { lstrcpynA((char *)G(ARG(0)), GS(ARG(1)), (int)ARG(2)); RET(3, ARG(0)); }
-static void k_lstrcatA(CPU *c) { strcat((char *)G(ARG(0)), (const char *)G(ARG(1))); RET(2, ARG(0)); }
+static void k_lstrcatA(CPU *c) {
+    char *dst = (char *)G(ARG(0));
+    const char *src = (const char *)G(ARG(1));
+    memmove(dst + strlen(dst), src, strlen(src) + 1);
+    RET(2, ARG(0));
+}
 static void k_lstrcmpA(CPU *c) { RET(2, (uint32_t)lstrcmpA(GS(ARG(0)), GS(ARG(1)))); }
 static void k_lstrcmpiA(CPU *c) { RET(2, (uint32_t)lstrcmpiA(GS(ARG(0)), GS(ARG(1)))); }
 

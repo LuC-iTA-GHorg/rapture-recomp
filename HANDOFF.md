@@ -123,6 +123,12 @@ ddraw (mode change no-op), dsound.c (DirectSound on SDL audio), movie.cpp (MCIWn
 platform::Movie), window.cpp (platform::Window + `--autoplay` scripts, PNG shots),
 module.c (images, DllMain order, LoadLibrary/GetProcAddress, resources).
 
+Mouse moves are merged as in Windows: a WM_MOUSEMOVE still at the end of the queue takes the
+new position instead of a new message being queued, and SDL moves within the same 640x480
+pixel are dropped. Before, every SDL motion event queued WM_SETCURSOR + WM_MOUSEMOVE; the
+bigger the window the more events per move, and the cursor and clicks lagged behind the
+backlog (reported by the user on MuShoot in a large window).
+
 ### Tests
 * `test_threads` (guest threads through the Win32 layer, no game code).
 * `test_mushoot_crt` (3275 checks: CRT string/memory functions, x87 helpers) — `RECOMP_BUILD_TESTS`.

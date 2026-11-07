@@ -129,11 +129,33 @@ static uint32_t mk_flags(void) {
     return f;
 }
 
+/* Like Windows, mouse moves are not queued one by one: if the newest queued
+ * message is still a WM_MOUSEMOVE for this window, it takes the new position.
+ * Otherwise a game that handles one message per frame falls behind a fast
+ * mouse (the bigger the window, the more SDL motion events per move), and its
+ * clicks wait behind the backlog. */
+static int merge_mousemove(uint32_t hwnd, uint32_t wp, uint32_t lp) {
+    int merged = 0;
+    qinit();
+    EnterCriticalSection(&qlock);
+    if (qtail != qhead) {
+        qmsg *m = &queue[(qtail + QSIZE - 1) % QSIZE];
+        if (m->hwnd == hwnd && m->msg == WM_MOUSEMOVE) {
+            m->wp = wp; m->lp = lp;
+            m->time = w32_host_ticks(); m->x = (uint32_t)mouse_x; m->y = (uint32_t)mouse_y;
+            merged = 1;
+        }
+    }
+    LeaveCriticalSection(&qlock);
+    return merged;
+}
+
 static void mouse_message(uint32_t msg) {
     uint32_t hwnd = capture_hwnd ? capture_hwnd : main_window();
     wnd *w = W(hwnd);
     if (!w) return;
     int cx = mouse_x - w->x, cy = mouse_y - w->y;
+    if (msg == WM_MOUSEMOVE && merge_mousemove(hwnd, mk_flags(), ((uint32_t)(uint16_t)cy << 16) | (uint16_t)cx)) return;
     if (msg == WM_MOUSEMOVE || msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN)
         w32_post_message(hwnd, WM_SETCURSOR, hwnd, HTCLIENT | (msg << 16));
     w32_post_message(hwnd, msg, mk_flags(), ((uint32_t)(uint16_t)cy << 16) | (uint16_t)cx);
@@ -158,6 +180,7 @@ void w32_pump_host_events(void) {
             break;
         }
         case W32_EV_MOUSEMOVE:
+            if (e.x == mouse_x && e.y == mouse_y) break;   /* same 640x480 pixel */
             mouse_x = e.x; mouse_y = e.y;
             mouse_message(WM_MOUSEMOVE);
             break;

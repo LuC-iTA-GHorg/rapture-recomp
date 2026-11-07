@@ -1,7 +1,7 @@
 # Flying Frenzy, unattended full run (use with --fast 4): intro movies, title,
 # New game (1 player) -> OK, the hero stays idle until the foes take every
 # life (about 2 minutes at --fast 4), initials C L F -> OK, high-score table
-# -> OK, "Play again?" -> No, credits.
+# -> OK, "Play again?" -> No, credits; the game then exits by itself.
 wait 4000
 shot f01_intro
 wait 200000
@@ -35,6 +35,4 @@ wait 20000
 shot f11_credits
 wait 30000
 shot f12_credits
-wait 30000
-shot f13_end
-quit
+# the game closes itself when the credits end (exit code 0), so nothing follows

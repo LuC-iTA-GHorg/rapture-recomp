@@ -235,7 +235,9 @@ extern "C" void w32_host_show_cursor(int show) { if (g_open) g_win.ShowCursor(sh
 
 // Cursor shape: a host HCURSOR (from a guest cursor resource) becomes an SDL color
 // cursor, scaled with the window; anything else (system cursors) is the SDL arrow.
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <windows.h>
 #include <map>
 extern "C" void w32_host_set_cursor_shape(uint32_t hcursor) {
