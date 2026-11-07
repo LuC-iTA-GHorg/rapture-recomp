@@ -1,4 +1,4 @@
-/* rapture-recomp runtime: guest memory, dispatch, faults. */
+/* rapture-recomp runtime: guest memory, dispatch, imports, faults, x87 helpers. */
 #include "recomp.h"
 
 #include <math.h>
@@ -7,16 +7,20 @@
 #include <windows.h>
 
 uint8_t *rc_mem;
+int rc_trace;   /* 1: log indirect calls; 2: also log every import/host call */
 
 /* Guest addresses of the import thunks: one 16-byte slot per import. */
 #define RC_THUNK_BASE 0xFFF00000u
+/* Dynamic host thunks (COM methods, GetProcAddress results): 16 bytes each. */
+#define RC_HOST_THUNK_BASE 0xFFE00000u
+#define RC_HOST_THUNK_MAX  0x10000u
 /* Guest address that ends rc_invoke (a return here stops the run). */
 #define RC_EXIT_ADDR  0xFFFFFFF0u
 
 int rc_init(void) {
     rc_mem = (uint8_t *)VirtualAlloc(NULL, (SIZE_T)1 << 32, MEM_RESERVE, PAGE_NOACCESS);
     if (!rc_mem) return -1;
-    return rc_commit(RC_THUNK_BASE, 0x00100000u);
+    return rc_commit(RC_HOST_THUNK_BASE, 0x00200000u);
 }
 
 int rc_commit(uint32_t addr, uint32_t size) {
@@ -34,10 +38,10 @@ int rc_load_image(const char *path, uint32_t base, uint32_t size) {
 }
 
 uint32_t rc_alloc_stack(uint32_t size) {
-    static uint32_t next = 0x00100000u;   /* below the exe's 0x400000 */
+    static uint32_t next = 0x00100000u;   /* stacks live in 0x00100000..0x003FFFFF */
     uint32_t base = next;
     next += size;
-    if (rc_commit(base, size)) return 0;
+    if (next > 0x00400000u || rc_commit(base, size)) return 0;
     return base + size - 16;
 }
 
@@ -52,34 +56,89 @@ rc_fn rc_lookup(uint32_t target) {
     return NULL;
 }
 
-int rc_trace;   /* set by the host (e.g. from an environment variable) to log indirect calls */
+/* -- imports and host thunks ----------------------------------------- */
+static rc_fn host_thunk_fn[RC_HOST_THUNK_MAX];
+static const char *host_thunk_name[RC_HOST_THUNK_MAX];
+static uint32_t host_thunk_count;
+static rc_fn *import_fn;          /* resolved lazily, one per rc_import_table entry */
+
+uint32_t rc_host_thunk(rc_fn fn, const char *name) {
+    for (uint32_t k = 0; k < host_thunk_count; k++)
+        if (host_thunk_fn[k] == fn) return RC_HOST_THUNK_BASE + 16u * k;
+    if (host_thunk_count == RC_HOST_THUNK_MAX) { fprintf(stderr, "rc: out of host thunks\n"); abort(); }
+    host_thunk_fn[host_thunk_count] = fn;
+    host_thunk_name[host_thunk_count] = name;
+    return RC_HOST_THUNK_BASE + 16u * host_thunk_count++;
+}
+
+int rc_ieq(const char *a, const char *b) {
+    for (; *a && *b; a++, b++) {
+        char x = *a, y = *b;
+        if (x >= 'A' && x <= 'Z') x += 32;
+        if (y >= 'A' && y <= 'Z') y += 32;
+        if (x != y) return 0;
+    }
+    return *a == *b;
+}
+
+rc_fn rc_hle_find(const char *dll, const char *name) {
+    for (const rc_hle_entry *const *t = rc_hle_tables; *t; t++)
+        for (const rc_hle_entry *e = *t; e->name; e++)
+            if (rc_ieq(e->dll, dll) && strcmp(e->name, name) == 0) return e->fn;
+    return NULL;
+}
+
+void rc_call_import(CPU *c, uint32_t idx) {
+    if (!import_fn) import_fn = (rc_fn *)calloc(rc_import_count + 1, sizeof *import_fn);
+    rc_fn fn = import_fn[idx];
+    if (!fn) {
+        const rc_import *im = &rc_import_table[idx];
+        fn = im->name ? rc_hle_find(im->dll, im->name) : NULL;
+        if (!fn) {
+            fprintf(stderr, "rc: import %s!%s (ord %u) not implemented\n",
+                    im->dll, im->name ? im->name : "?", im->ordinal);
+            rc_fault(c, rd32(c->esp), "unimplemented import (address = return address)");
+        }
+        import_fn[idx] = fn;
+    }
+    if (rc_trace > 1)
+        fprintf(stderr, "rc: %s!%s from %08x\n", rc_import_table[idx].dll, rc_import_table[idx].name, rd32(c->esp));
+    fn(c);
+}
 
 void rc_call(CPU *c, uint32_t target) {
     if (rc_trace) fprintf(stderr, "rc: call %08x esp=%08x\n", target, c->esp);
     rc_fn fn = rc_lookup(target);
     if (fn) { fn(c); return; }
     if (target >= RC_THUNK_BASE && target < RC_THUNK_BASE + rc_import_count * 16u) {
-        const rc_import *im = &rc_import_table[(target - RC_THUNK_BASE) / 16u];
-        fprintf(stderr, "rc: import %s!%s (ord %u) not implemented\n",
-                im->dll, im->name ? im->name : "?", im->ordinal);
-        rc_fault(c, target, "unimplemented import");
+        rc_call_import(c, (target - RC_THUNK_BASE) / 16u);
+        return;
+    }
+    if (target >= RC_HOST_THUNK_BASE && target < RC_HOST_THUNK_BASE + host_thunk_count * 16u) {
+        uint32_t k = (target - RC_HOST_THUNK_BASE) / 16u;
+        if (rc_trace > 1) fprintf(stderr, "rc: host %s\n", host_thunk_name[k] ? host_thunk_name[k] : "?");
+        host_thunk_fn[k](c);
+        return;
     }
     rc_fault(c, target, "indirect call to an unknown address");
 }
 
 uint32_t rc_invoke(CPU *c, uint32_t fn, int argc, const uint32_t *argv) {
+    uint32_t sp0 = c->esp;
     for (int k = argc - 1; k >= 0; k--) { c->esp -= 4; wr32(c->esp, argv[k]); }
-    uint32_t sp = c->esp;
     c->esp -= 4; wr32(c->esp, RC_EXIT_ADDR);
     rc_call(c, fn);
-    (void)sp;   /* cdecl: caller pops; stdcall: callee already popped */
-    c->esp = sp + 4u * (uint32_t)argc;
+    c->esp = sp0;   /* works for cdecl (caller pops) and stdcall (callee popped) */
     return c->eax;
 }
 
 void rc_fault(CPU *c, uint32_t addr, const char *what) {
-    fprintf(stderr, "rc: fault at %08x: %s (eax=%08x ecx=%08x edx=%08x esp=%08x)\n",
-            addr, what, c->eax, c->ecx, c->edx, c->esp);
+    fprintf(stderr, "rc: fault at %08x: %s (eax=%08x ecx=%08x edx=%08x ebx=%08x esi=%08x edi=%08x ebp=%08x esp=%08x)\n",
+            addr, what, c->eax, c->ecx, c->edx, c->ebx, c->esi, c->edi, c->ebp, c->esp);
+    fprintf(stderr, "rc: stack:");
+    for (int k = 0; k < 16; k++) fprintf(stderr, " %08x", rd32(c->esp + 4u * (uint32_t)k));
+    fprintf(stderr, "\n");
+    fflush(stderr);
     abort();
 }
 
@@ -101,7 +160,7 @@ double rc_fround(CPU *c, double v) {
 int64_t rc_fist(CPU *c, double v, int bits) {
     double r = rc_fround(c, v);
     double lim = ldexp(1.0, bits - 1);
-    if (!(r >= -lim && r < lim)) return bits == 64 ? INT64_MIN : -((int64_t)1 << (bits - 1));  /* 0x80..0 */
+    if (!(r >= -lim && r < lim)) return bits == 64 ? INT64_MIN : -((int64_t)1 << (bits - 1));  /* integer indefinite */
     return (int64_t)r;
 }
 

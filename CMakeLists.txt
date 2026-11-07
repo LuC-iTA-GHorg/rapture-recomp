@@ -29,7 +29,7 @@ file(GLOB GEN_SOURCES "${GEN_DIR}/code_*.c")
 file(GLOB RECOMP_PY "${CMAKE_SOURCE_DIR}/recomp/*.py")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${GAME_CONFIG} ${RECOMP_PY})
 
-add_library(recomp_runtime STATIC runtime/runtime.c)
+add_library(recomp_runtime STATIC runtime/runtime.c win32/hle_tables.c)
 target_include_directories(recomp_runtime PUBLIC runtime)
 
 add_library(game_gen STATIC ${GEN_SOURCES} "${GEN_DIR}/dispatch.c")

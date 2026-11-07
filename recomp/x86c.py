@@ -36,6 +36,9 @@ CC = {
 }
 
 
+THUNK_BASE = 0xFFF00000
+
+
 class Unsupported(Exception):
     pass
 
@@ -45,7 +48,8 @@ def fname(addr: int) -> str:
 
 
 class Translator:
-    def __init__(self, func: Function, known: set[int]):
+    def __init__(self, func: Function, known: set[int], iat: dict[int, int] | None = None):
+        self.iat = iat or {}         # IAT slot -> resolved target (guest export or thunk)
         self.f = func
         self.known = known           # every function entry of every module
         self.out: list[str] = []
@@ -275,11 +279,27 @@ class Translator:
                 if t in self.known:
                     return [push + f" {fname(t)}(c);"]
                 return [push + f" rc_call(c, 0x{t:x}u);"]
+            direct = self.iat_call(ops[0])
+            if direct:
+                return [push + " " + direct]
             return ["{ uint32_t t = " + self.rd(i, ops[0]) + "; " + push + " rc_call(c, t); }"]
         if mn == "ret":
             n = 4 + (ops[0].imm if ops else 0)
             return [f"c->esp += {n}; return;"]
         raise Unsupported("mnemonic")
+
+    def iat_call(self, op) -> str | None:
+        """`call/jmp dword ptr [slot]` through an IAT slot resolved at recompile time."""
+        if op.type != X.X86_OP_MEM or op.mem.base or op.mem.index or op.mem.segment:
+            return None
+        t = self.iat.get(op.mem.disp & 0xFFFFFFFF)
+        if t is None:
+            return None
+        if t in self.known:
+            return f"{fname(t)}(c);"
+        if t >= THUNK_BASE:
+            return f"rc_call_import(c, {(t - THUNK_BASE) // 16}u);"
+        return None
 
     def jmp(self, i) -> list[str]:
         op = i.operands[0]
@@ -297,6 +317,9 @@ class Translator:
             out.append("}")
             return out
         # Indirect jump that is not a table: a tail call (import thunks, `jmp eax`).
+        direct = self.iat_call(op)
+        if direct:
+            return [direct + " return;"]
         return ["{ uint32_t t = " + self.rd(i, op) + "; rc_call(c, t); return; }"]
 
     def alu2(self, i, mn) -> list[str]:

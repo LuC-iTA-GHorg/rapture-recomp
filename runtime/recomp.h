@@ -71,7 +71,12 @@ static inline void *rc_ptr(uint32_t a) { return rc_mem + a; }
 
 /* Indirect call / tail call through a guest address (function, import thunk). */
 void rc_call(CPU *c, uint32_t target);
+/* Call system import number idx (index into rc_import_table). */
+void rc_call_import(CPU *c, uint32_t idx);
 extern int rc_trace;
+/* Look up an HLE function by DLL and symbol name (case-insensitive DLL). */
+rc_fn rc_hle_find(const char *dll, const char *name);
+int rc_ieq(const char *a, const char *b);   /* ASCII case-insensitive equality */
 /* Look up a recompiled function; NULL if the address is not a known entry. */
 rc_fn rc_lookup(uint32_t target);
 
@@ -96,7 +101,23 @@ typedef struct { uint32_t slot; const char *dll; const char *name; uint32_t ordi
 extern const rc_import rc_import_table[];
 extern const uint32_t rc_import_count;
 
-typedef struct { const char *name; const char *image; uint32_t base, size; } rc_module;
+typedef struct { const char *name; const char *image; uint32_t base, size, entry; } rc_module;
+typedef struct { uint32_t module; const char *name; uint32_t ordinal; uint32_t addr; } rc_export;
+extern const rc_export rc_export_table[];
+extern const uint32_t rc_export_count;
+
+/* -- host implementations of system imports (HLE) ---------------------
+ * An HLE function behaves like a guest function: arguments are on the guest
+ * stack above the return address, the result goes in eax (edx:eax), and a
+ * stdcall function pops its arguments together with the return address. */
+typedef struct { const char *dll; const char *name; rc_fn fn; } rc_hle_entry;
+/* NULL-terminated list of NULL-terminated tables, provided by the HLE layer. */
+extern const rc_hle_entry *const rc_hle_tables[];
+#define ARG(n) rd32(c->esp + 4u + 4u * (uint32_t)(n))
+#define RET(nargs, v) do { c->eax = (uint32_t)(v); c->esp += 4u + 4u * (uint32_t)(nargs); return; } while (0)
+/* Allocate a guest address that, when called, runs host function fn (COM methods,
+   GetProcAddress results, callbacks handed to guest code). */
+uint32_t rc_host_thunk(rc_fn fn, const char *name);
 extern const rc_module rc_module_table[];
 extern const uint32_t rc_module_count;
 

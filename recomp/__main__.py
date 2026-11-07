@@ -51,6 +51,7 @@ def main(argv=None) -> int:
     # -- imports: other guest modules resolve statically, the rest get thunks
     thunks: dict[tuple, int] = {}
     import_rows = []
+    iat: dict[int, int] = {}
     for m in mods:
         for im in m.imports:
             target_mod = by_name.get(im.dll)
@@ -65,6 +66,7 @@ def main(argv=None) -> int:
                 t = thunks[key]
             struct.pack_into("<I", m.image, im.slot - m.base, t)
             import_rows.append((im.slot, im.dll, im.name, im.ordinal or 0, t))
+            iat[im.slot] = t
 
     for m in mods:
         with open(os.path.join(a.out, m.name + ".bin"), "wb") as fh:
@@ -89,7 +91,7 @@ def main(argv=None) -> int:
     bodies = []
     unimpl = []
     for e in sorted(funcs):
-        t = Translator(funcs[e], known)
+        t = Translator(funcs[e], known, iat)
         bodies.append(t.translate())
         unimpl.extend(t.unimpl)
         for b in funcs[e].bad:
@@ -123,9 +125,19 @@ def main(argv=None) -> int:
         fh.write(f"const uint32_t rc_import_count = {len(thunks)};\n\n")
         fh.write("const rc_module rc_module_table[] = {\n")
         for m in mods:
-            fh.write(f'  {{"{m.name}", "{m.name}.bin", 0x{m.base:08x}u, 0x{m.size:x}u}},\n')
+            fh.write(f'  {{"{m.name}", "{m.name}.bin", 0x{m.base:08x}u, 0x{m.size:x}u, 0x{m.entry:08x}u}},\n')
         fh.write("};\n")
-        fh.write(f"const uint32_t rc_module_count = {len(mods)};\n")
+        fh.write(f"const uint32_t rc_module_count = {len(mods)};\n\n")
+        fh.write("const rc_export rc_export_table[] = {\n")
+        nexp = 0
+        for k, m in enumerate(mods):
+            names = {ad: n for n, ad in m.exports.items()}
+            for o, ad in sorted(m.exports_ord.items()):
+                nm = f'"{names[ad]}"' if ad in names else "0"
+                fh.write(f"  {{{k}u, {nm}, {o}u, 0x{ad:08x}u}},\n")
+                nexp += 1
+        fh.write("  {0, 0, 0, 0}\n};\n")
+        fh.write(f"const uint32_t rc_export_count = {nexp};\n")
 
     report.append(f"system imports (thunks): {len(thunks)}")
     report.append(f"unsupported instructions: {len(unimpl)}")
