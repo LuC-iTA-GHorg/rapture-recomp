@@ -81,6 +81,31 @@ build\mushoot.exe --autoplay script.txt --outdir OUT [--fast 4] [--settings OUT\
    `__sbh_alloc_block` address of each module: same moses/Aaron/exe addresses), then a port.
 6. Build speed: rapture-engine's whole library is compiled although only `platform/` is used.
 
+## Flounder (branch `flounder`, 2026-11-07)
+
+**Disney's Flounder Quest is playable**, built by the public `flounder-quest-rapture-port`
+(`build.bat`, submodule `recomp/` = this branch). Config: `configs/flounder.toml`
+(`Quest.exe` + `quest.dll` + moses + Aaron, same guest bases as MuShoot; `__sbh_alloc_block`
+of `quest.dll` found by a relocation-masked byte match of MuShoot's; the exe, moses and Aaron
+addresses are the same as in MuShoot). Recompiled: 3,993 functions, ~137 k instructions,
+0 unsupported instructions; no game-specific code anywhere else.
+
+Verified unattended (`--autoplay`, `--fast 4`, settings in a scratch .ini):
+intro movies, title, Sebastian's spoken intro, New game dialog (keyboard and mouse), level 1
+(tiles, scrolling, HUD, timer, jellyfish, clam, swimming in every direction), the Options menu
+(Esc), the `FKeys` cheats (F3 +1 life, F4 +30 s), rescuing Flounder (+1000, "level complete",
+time bonus 500; no no-damage bonus since a jellyfish hit Sebastian: matches the hand port's
+formula), level 2, lives lost to timeouts, game over, initials entry, high-score table (saved
+to the .ini: 1500, level 2, easy), "Play again?". The game-over path with score 0 gives the
+same screens as the hand port (`flounder-quest-rapture-dev`, its `gameover.txt` script).
+Not verified: music/sound (dummy audio), save/restore, long play (eels, sharks, chests,
+breakable blocks), levels above 2, the visible window.
+
+Changes to common code (generic, MuShoot rebuilt: `test_mushoot_crt` 3275/0, difftest
+601/601 agree, autoplay boot to the New game dialog):
+* `win32/window.cpp`: autoplay commands `keydown NAME` / `keyup NAME` (hold a key: games that
+  steer with `GetKeyState`) and the key name `alt`.
+
 ## Rules
 * Nothing derived from the games in git: check `git ls-files` and grep before every push.
 * Repository is **private** until the user reviews it. No LICENSE yet (user's decision).
