@@ -10,6 +10,10 @@
 
 #include <windows.h>
 
+#if __has_include("build_info.h")
+#include "build_info.h"   /* RC_BUILD_GAME_DIR, written by CMake in the build directory */
+#endif
+
 void w32_attach_static_dlls(void);
 void w32_set_settings_path(const char *path);
 extern const char rc_game_settings[];

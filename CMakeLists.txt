@@ -76,13 +76,13 @@ if(RECOMP_BUILD_GAME)
 
   file(GLOB WIN32_SOURCES CONFIGURE_DEPENDS win32/*.c win32/*.cpp)
   add_executable(${GAME_EXE} ${WIN32_SOURCES} $<TARGET_OBJECTS:game_gen> $<TARGET_OBJECTS:recomp_runtime>)
-  target_include_directories(${GAME_EXE} PRIVATE runtime win32 "${RAPTURE_ENGINE_DIR}")
+  target_include_directories(${GAME_EXE} PRIVATE runtime win32 "${RAPTURE_ENGINE_DIR}" "${GEN_DIR}")
   target_link_libraries(${GAME_EXE} PRIVATE rapture SDL2::SDL2 gdi32 winmm msimg32)
   target_compile_options(${GAME_EXE} PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wno-unused-function>)
   # The game folder of this build: the executable falls back to it when started elsewhere.
-  file(TO_NATIVE_PATH "${GAME_DIR}" GAME_DIR_NATIVE)
-  string(REPLACE "\\" "\\\\" GAME_DIR_C "${GAME_DIR_NATIVE}")
-  set_source_files_properties(win32/main.c PROPERTIES COMPILE_DEFINITIONS "RC_BUILD_GAME_DIR=\"${GAME_DIR_C}\"")
+  file(TO_CMAKE_PATH "${GAME_DIR}" GAME_DIR_FWD)   # forward slashes: no escaping needed in C
+  file(WRITE "${GEN_DIR}/build_info.h" "#define RC_BUILD_GAME_DIR \"${GAME_DIR_FWD}\"
+")
   if(MINGW)
     target_link_options(${GAME_EXE} PRIVATE -static-libgcc -static-libstdc++)
   endif()
