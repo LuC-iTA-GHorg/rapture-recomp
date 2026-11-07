@@ -97,4 +97,18 @@ if(RECOMP_BUILD_GAME)
   endforeach()
   add_custom_command(TARGET ${GAME_EXE} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${RUNTIME_DLLS} "$<TARGET_FILE_DIR:${GAME_EXE}>/")
+
+  # Guest threads through the real Win32 layer (no game code runs: host thunks).
+  if(RECOMP_BUILD_TESTS)
+    set(WIN32_LAYER_SOURCES ${WIN32_SOURCES})
+    list(FILTER WIN32_LAYER_SOURCES EXCLUDE REGEX "/main\.c$")
+    add_executable(test_threads tests/test_threads.c ${WIN32_LAYER_SOURCES}
+                   $<TARGET_OBJECTS:game_gen> $<TARGET_OBJECTS:recomp_runtime>)
+    target_include_directories(test_threads PRIVATE runtime win32 "${RAPTURE_ENGINE_DIR}" "${GEN_DIR}")
+    target_link_libraries(test_threads PRIVATE rapture SDL2::SDL2 gdi32 winmm msimg32)
+    if(MINGW)
+      target_link_options(test_threads PRIVATE -static-libgcc -static-libstdc++)
+    endif()
+    add_test(NAME threads COMMAND test_threads)
+  endif()
 endif()

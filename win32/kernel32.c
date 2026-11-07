@@ -205,51 +205,62 @@ static void k_VirtualQuery(CPU *c) {
  * and a TEB (fs:): [0] SEH chain, [4] stack top, [8] stack limit, [0x18]
  * self, [0x24] thread id, [0x34] last error.
  * ====================================================================== */
-#define TEB_AREA 0x7E000000u
+#define TEB_AREA W32_TEB_AREA
 static __thread CPU *tls_cpu;
-static CRITICAL_SECTION thread_lock;
-static uint32_t teb_next = TEB_AREA;
+static __thread int tls_slot;       /* this thread's slot in threads.c, 0 = main */
 
-static CPU *new_cpu(uint32_t stack_size) {
-    CPU *c = (CPU *)calloc(1, sizeof *c);
-    EnterCriticalSection(&thread_lock);
-    uint32_t teb = teb_next;
-    teb_next += 0x1000;
-    rc_commit(teb, 0x1000);
-    uint32_t sp = rc_alloc_stack(stack_size);
-    LeaveCriticalSection(&thread_lock);
-    if (!sp) { fprintf(stderr, "w32: out of guest stack space\n"); abort(); }
+static void init_cpu(CPU *c, uint32_t teb, uint32_t stack_top, uint32_t stack_size) {
+    uint32_t sp = stack_top - 16;
     wr32(teb + 0x00, 0xFFFFFFFFu);
-    wr32(teb + 0x04, sp + 16);
-    wr32(teb + 0x08, sp + 16 - stack_size);
+    wr32(teb + 0x04, stack_top);
+    wr32(teb + 0x08, stack_top - stack_size);
     wr32(teb + 0x18, teb);
     wr32(teb + 0x20, GetCurrentProcessId());
     wr32(teb + 0x24, GetCurrentThreadId());
     c->fs_base = teb;
     c->esp = sp;
     c->cw = 0x027F;   /* the x87 control word Windows gives a new thread */
-    return c;
 }
 
 CPU *w32_cpu(void) { return tls_cpu; }
 
 CPU *w32_main_cpu(void) {
-    InitializeCriticalSection(&thread_lock);
+    w32_slots_init();
     heap_init();
-    tls_cpu = new_cpu(0x100000u);
-    return tls_cpu;
+    CPU *c = (CPU *)calloc(1, sizeof *c);
+    uint32_t teb = w32_slot_teb(0);
+    rc_commit(teb, 0x1000);
+    uint32_t sp = rc_alloc_stack(0x100000u);
+    if (!sp) { fprintf(stderr, "w32: out of guest stack space\n"); abort(); }
+    init_cpu(c, teb, sp + 16, 0x100000u);
+    tls_cpu = c;
+    tls_slot = 0;
+    return c;
 }
 
 void w32_set_last_error(uint32_t e) { if (tls_cpu) wr32(tls_cpu->fs_base + 0x34, e); }
 
-typedef struct { uint32_t start, param; } thread_start;
+/* Ends the guest side of the calling thread: its slot (TEB, stack) can be reused. */
+static void end_guest_thread(void) {
+    if (tls_slot > 0) {
+        w32_slot_release(tls_slot);
+        free(tls_cpu);
+        tls_cpu = NULL;
+        tls_slot = 0;
+    }
+}
+
+typedef struct { uint32_t start, param, teb, stack_top; int slot; } thread_start;
 
 static DWORD WINAPI thread_main(LPVOID p) {
     thread_start ts = *(thread_start *)p;
     free(p);
-    tls_cpu = new_cpu(0x40000u);
-    wr32(tls_cpu->fs_base + 0x24, GetCurrentThreadId());
-    uint32_t r = rc_invoke(tls_cpu, ts.start, 1, &ts.param);
+    CPU *c = (CPU *)calloc(1, sizeof *c);
+    init_cpu(c, ts.teb, ts.stack_top, W32_THREAD_STACK);
+    tls_cpu = c;
+    tls_slot = ts.slot;
+    uint32_t r = rc_invoke(c, ts.start, 1, &ts.param);
+    end_guest_thread();
     return r;
 }
 
@@ -258,16 +269,39 @@ static void k_CreateThread(CPU *c) {
     thread_start *ts = (thread_start *)malloc(sizeof *ts);
     ts->start = start;
     ts->param = param;
+    /* The slot is taken here, not in the new thread: a failure is the caller's
+       NULL return, as on Windows, and a suspended thread already owns its stack. */
+    ts->slot = w32_slot_acquire(&ts->teb, &ts->stack_top);
+    if (ts->slot < 0) {
+        fprintf(stderr, "w32: CreateThread: all %d guest thread slots are in use\n", W32_THREAD_SLOTS - 1);
+        free(ts);
+        w32_set_last_error(ERROR_NOT_ENOUGH_MEMORY);
+        RET(6, 0);
+    }
     DWORD id;
     HANDLE h = CreateThread(NULL, 0x100000, thread_main, ts, flags & CREATE_SUSPENDED, &id);
+    if (!h) { w32_slot_release(ts->slot); free(ts); RET(6, 0); }
+    wr32(ts->teb + 0x24, id);   /* known before the thread runs (TerminateThread of a suspended one) */
     if (tid) wr32(tid, id);
-    W32_LOG("CreateThread %08x -> %u", start, (unsigned)id);
+    W32_LOG("CreateThread %08x -> %u (slot %d, %d in use)", start, (unsigned)id, ts->slot, w32_slots_in_use());
     RET(6, KHG(h));
 }
-static void k_ExitThread(CPU *c) { ExitThread(ARG(0)); }
+static void k_ExitThread(CPU *c) {
+    uint32_t code = ARG(0);
+    end_guest_thread();      /* runs on the host stack: the guest stack is no longer needed */
+    ExitThread(code);
+}
 static void k_ResumeThread(CPU *c) { RET(1, ResumeThread(KH(ARG(0)))); }
 static void k_SuspendThread(CPU *c) { RET(1, SuspendThread(KH(ARG(0)))); }
-static void k_TerminateThread(CPU *c) { RET(2, TerminateThread(KH(ARG(0)), ARG(1))); }
+static void k_TerminateThread(CPU *c) {
+    HANDLE h = KH(ARG(0));
+    if (!h) { w32_set_last_error(ERROR_INVALID_HANDLE); RET(2, 0); }
+    int slot = w32_slot_of_thread(GetThreadId(h));
+    BOOL ok = TerminateThread(h, ARG(1));
+    /* TerminateThread is asynchronous: give the slot back once the thread is gone. */
+    if (ok && slot > 0 && WaitForSingleObject(h, 5000) == WAIT_OBJECT_0) w32_slot_release(slot);
+    RET(2, ok);
+}
 static void k_SetThreadPriority(CPU *c) { RET(2, SetThreadPriority(KH(ARG(0)), (int)ARG(1))); }
 static void k_GetCurrentThread(CPU *c) { RET(0, 0xFFFFFFFEu); }
 static void k_GetCurrentProcess(CPU *c) { RET(0, 0xFFFFFFFFu); }

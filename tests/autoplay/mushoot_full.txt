@@ -1,0 +1,39 @@
+# MuShoot, unattended full run (win32/window.cpp script; coordinates in 640x480):
+# intro movies -> title -> New game -> the cannon stays idle until the Huns take
+# every house (game over) -> initials A B C -> OK -> high-score table -> OK ->
+# "Play again?" No -> credits.
+#   build\mushoot.exe --autoplay tests\autoplay\mushoot_full.txt --outdir OUT --settings OUT\s.ini --fast 4
+# Waits are game milliseconds (movies and speech run in real time); about 2 minutes.
+wait 1500
+key space
+wait 4000
+key space
+wait 4000
+click 180 335
+wait 420000
+shot n0
+click 145 175
+wait 800
+click 195 175
+wait 800
+click 245 175
+wait 1000
+shot n1
+click 226 385
+wait 2500
+shot n2
+wait 4000
+shot n3
+click 224 386
+wait 2500
+shot n4
+wait 3000
+shot n5
+click 375 290
+wait 4000
+shot n6_after_no
+wait 8000
+shot n7_credits
+wait 8000
+shot n8_credits
+quit

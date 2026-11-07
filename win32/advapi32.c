@@ -5,6 +5,9 @@
  * `Name=1234`, REG_BINARY `Name=hex:0a0b...`, REG_SZ `Name=str:text`. The file
  * is %APPDATA%\<folder>\<file> (w32_settings_path, set from the game config or
  * --settings FILE) and is rewritten after every change.
+ * A section [*] holds defaults: a value missing from a key is looked up there,
+ * and keys opened straight from a hive root exist (an autoplay settings seed can
+ * set e.g. a cheat flag without naming the game's key). Without [*] nothing changes.
  */
 #include "w32.h"
 
@@ -116,7 +119,10 @@ static uint32_t open_key(uint32_t parent, const char *sub, int create) {
     if (!p) return 0;
     char path[1024];
     if (sub && *sub) snprintf(path, sizeof path, "%s\\%s", p, sub); else snprintf(path, sizeof path, "%s", p);
-    if (!create && !key_exists(path)) return 0;
+    /* With a [*] defaults section, a key opened straight from a hive root exists:
+       the game's own key, so it reads the defaults on a first run too. */
+    int seeded = parent >= 0x80000000u && parent <= 0x80000003u && find_sec("*", 0);
+    if (!create && !seeded && !key_exists(path)) return 0;
     if (create && !find_sec(path, 0)) { find_sec(path, 1); save(); }
     for (int k = 0; k < MAX_KEYS; k++)
         if (!keys[k]) { keys[k] = dup(path); return KEY_BASE + 4u * (uint32_t)k; }
@@ -128,6 +134,7 @@ static void a_RegOpenKeyExA(CPU *c) {
     EnterCriticalSection(&reg_lock);
     uint32_t h = open_key(ARG(0), GS(ARG(1)), 0);
     LeaveCriticalSection(&reg_lock);
+    W32_LOG("RegOpenKeyEx %s -> %s", GS(ARG(1)) ? GS(ARG(1)) : "", h ? "ok" : "not found");
     if (!h) RET(5, ERROR_FILE_NOT_FOUND);
     wr32(ARG(4), h);
     RET(5, ERROR_SUCCESS);
@@ -139,6 +146,7 @@ static void a_RegCreateKeyExA(CPU *c) {
     char path[1024];
     snprintf(path, sizeof path, "%s\\%s", p ? p : "?", GS(ARG(1)) ? GS(ARG(1)) : "");
     int existed = key_exists(path);
+    W32_LOG("RegCreateKeyEx %s (%s)", GS(ARG(1)) ? GS(ARG(1)) : "", existed ? "existed" : "new");
     uint32_t h = open_key(ARG(0), GS(ARG(1)), 1);
     LeaveCriticalSection(&reg_lock);
     if (!h) RET(9, ERROR_ACCESS_DENIED);
@@ -162,6 +170,11 @@ static void a_RegQueryValueExA(CPU *c) {
     EnterCriticalSection(&reg_lock);
     ini_sec *s = path ? find_sec(path, 0) : NULL;
     ini_val *v = s ? find_val(s, name, 0) : NULL;
+    if (!v && path && *name) {          /* defaults for every key: section [*] */
+        ini_sec *d = find_sec("*", 0);
+        v = d ? find_val(d, name, 0) : NULL;
+    }
+    W32_LOG("RegQueryValueEx %s -> %s", name, v ? v->value : "not found");
     if (!v) { LeaveCriticalSection(&reg_lock); RET(6, ERROR_FILE_NOT_FOUND); }
     uint8_t buf[2048];
     uint32_t n, type;

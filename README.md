@@ -37,8 +37,9 @@ files. The executable runs in that folder (it goes there by itself, or `--game-d
 Options: `--fullscreen`, `--settings FILE.ini`, `--autoplay SCRIPT --outdir DIR [--fast N]`
 (unattended run with a hidden window, see `win32/window.cpp`), `--log`.
 
-Tests: `build\test_mushoot_crt build\gen`;
+Tests: `build\test_threads` (guest threads through the Win32 layer), `build\test_mushoot_crt build\gen`;
 `python tools/difftest.py configs/mushoot.toml --game-dir DIR --gen build/gen --runner build/difftest.exe`.
+Unattended full runs of each game: `tests/autoplay/` (see HANDOFF.md).
 The recompiler alone: `python -m recomp configs/mushoot.toml --game-dir DIR --out OUT`.
 
 ## Layout

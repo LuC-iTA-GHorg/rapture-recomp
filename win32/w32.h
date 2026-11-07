@@ -47,6 +47,18 @@ CPU *w32_cpu(void);
 /* Create the main thread's CPU, stack and TEB. */
 CPU *w32_main_cpu(void);
 
+/* Guest thread slots (threads.c): TEB + guest stack per thread, reused after the
+   thread ends. Slot 0 is the main thread; acquire returns -1 when all are busy. */
+#define W32_TEB_AREA 0x7E000000u
+#define W32_THREAD_SLOTS 56
+#define W32_THREAD_STACK 0x40000u
+void w32_slots_init(void);
+uint32_t w32_slot_teb(int slot);
+int w32_slot_acquire(uint32_t *teb, uint32_t *stack_top);
+void w32_slot_release(int slot);
+int w32_slot_of_thread(uint32_t tid);              /* slot of a running guest thread, -1 if none */
+int w32_slots_in_use(void);
+
 /* -- modules and resources (module.c) ---------------------------------- */
 int w32_load_modules(const char *gen_dir);         /* map images, call DllMain of the static DLLs */
 uint32_t w32_module_handle(const char *name);      /* base of a guest module, 0 if none */

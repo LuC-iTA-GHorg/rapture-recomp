@@ -1,0 +1,115 @@
+# Flounder Quest, unattended full run (win32/window.cpp script; coordinates in 640x480):
+# intro movies -> title -> New game OK -> F4 twice (+60 s, needs the FKeys cheat:
+# start with tests/autoplay/flounder_settings.ini) -> swim to Flounder (level 1
+# complete) -> level 2, lives lost to timeouts -> game over -> initials -> OK ->
+# high-score table -> OK -> "Play again?".
+#   copy tests\autoplay\flounder_settings.ini OUT\s.ini
+#   build\flounder.exe --autoplay tests\autoplay\flounder_full.txt --outdir OUT --settings OUT\s.ini --fast 4
+# Waits are game milliseconds (movies and speech run in real time). The settings
+# file is rewritten by the game: copy the seed again before every run.
+wait 40000
+key space
+wait 120000
+click 176 350
+wait 6000
+key f4
+key f4
+keydown right
+wait 2000
+keyup right
+keydown down
+wait 3000
+keyup down
+keydown right
+wait 16000
+keyup right
+keydown left
+wait 3600
+keyup left
+keydown up
+wait 4500
+keyup up
+keydown right
+wait 1900
+keyup right
+keydown down
+wait 2000
+keyup down
+keydown left
+wait 1400
+keyup left
+keydown down
+wait 1500
+keyup down
+shot q1
+keydown right
+wait 500
+keyup right
+keydown down
+wait 1500
+keyup down
+shot q2
+wait 8000
+shot r00
+wait 10000
+shot r01
+wait 10000
+shot r02
+wait 10000
+shot r03
+wait 10000
+shot r04
+wait 10000
+shot r05
+wait 10000
+shot r06
+wait 10000
+shot r07
+wait 10000
+shot r08
+wait 10000
+shot r09
+wait 10000
+shot r10
+wait 10000
+shot r11
+wait 10000
+shot r12
+wait 10000
+shot r13
+wait 10000
+shot r14
+wait 10000
+shot r15
+wait 10000
+shot r16
+wait 10000
+shot r17
+wait 10000
+shot r18
+wait 10000
+shot r19
+wait 10000
+shot r20
+wait 10000
+shot r21
+wait 10000
+shot r22
+wait 10000
+shot r23
+wait 10000
+shot r24
+key space
+key right
+key space
+key right
+key right
+key space
+shot r25_typed
+click 225 393
+wait 3000
+shot r26
+click 225 393
+wait 3000
+shot r27
+quit
