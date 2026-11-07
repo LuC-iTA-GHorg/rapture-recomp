@@ -1,99 +1,87 @@
 # HANDOFF
 
-Updated: 2026-11-07 (third session: steps 3 and 4 done, Win32 layer next).
+Updated: 2026-11-07 (third session: MuShoot playable from the public port).
 
 ## State
 
-* Architecture chosen: **B**, recompile exe + scene DLL + moses.dll + Aaron.dll into one
-  program over a flat guest address space, emulate Win32 on top of `rapture-engine`'s
-  platform layer. Rationale in `docs/DESIGN.md` (the feasibility survey that backs it is a
-  private working note outside this repo).
-* `recomp/` (Python, `pefile` + `capstone`):
-  * `pe.py`: loads PE32, static rebase with base relocations, imports/exports.
-  * `cfg.py`: seeds (entry, exports, relocated code pointers), recursive descent, jump
-    tables (unused leading slots, negative indexes), tail calls.
-  * `x86c.py`: x86 -> C for the integer subset (mov/alu/shift/mul/div/setcc/string ops/
-    control flow), function-local flags, guest stack in guest memory, `fs:` via fake TIB.
-  * `__main__.py`: driver; writes `<module>.bin`, `funcs.h`, `code_NNN.c`, `dispatch.c`,
-    `report.txt` to the build directory. Cross-guest imports resolved statically, system
-    imports get thunk addresses 0xFFF00000 + 16n.
-* `runtime/`: guest memory (4 GiB reserve), stack, image loading, `rc_call` dispatch
-  (binary search), `rc_invoke`, faults, x87 helpers; `rc_trace` (test: env `RC_TRACE=1`)
-  logs every indirect call.
-* `configs/mushoot.toml`: bases exe 0x400000, Shoot.dll 0x10000000, moses 0x10100000,
-  Aaron 0x10200000.
-* MuShoot numbers (session 2): shoot.exe 680 functions / 41 jump tables, shoot.dll 1174 / 40,
-  moses.dll 712 / 41, aaron.dll 1351 / 47; ~133 k instructions; 219 system imports; 250
-  unsupported instructions, almost all x87. All generated C compiles (gcc -O1).
-* Discovery check against the private Ghidra function lists (counts only, done locally):
-  the remaining differences are SEH filter/handler blocks that we find and Ghidra does not
-  (reached only through scope tables), dead code with no reference at all (23 in the exe,
-  ~25 in Shoot.dll), and bodies reached by a tail `jmp` that we merge into the caller as a
-  label (duplicated, not lost).
-* `tests/test_mushoot_crt.c`: 3194 checks pass: Shoot.dll's strlen, strcpy, strcat,
-  two memcpy/memmove variants (jump tables, overlap both directions), memset, and the
-  code-page -> LCID lookup, compared against host libc; also checks callee-saved registers.
+**MuShoot is playable**, built by the public `mushoot-rapture-port` (`build.bat`, submodule
+`recomp/` = this repository) from the user's own game files. Verified unattended (`--autoplay`,
+hidden window, SDL dummy audio): intro movies (DILogo/DDLogo), title, Mushu's spoken intro,
+New game dialog, levels with Huns/riders/hawks, firing, level-complete bonus, Options menu
+and every sub-dialog (Audio, High scores, Credits with fireworks, Save), game over, initials
+entry, high-score table (saved to the .ini), "Play again?". A clean clone of the port builds
+and runs.
 
-Build:
+### Recompiler (`recomp/`, Python + pefile + capstone)
+* `pe.py` PE32 loader with static rebasing; `cfg.py` function discovery (trusted seeds vs
+  candidates, plausibility filter, jump tables incl. negative indexes, exe without relocs);
+  `x86c.py` x86 -> C (integer set, x87 as 80-bit `long double` with precision control,
+  string ops, flags as locals, guest stack, `fs:` TEB); `__main__.py` driver.
+* Calls through the IAT are direct (guest export or `rc_call_import(idx)`).
+* Config (`configs/<game>.toml`, addresses of the original files only): module list and guest
+  bases, title, settings file, `[replace.<module>]` function replacements, difftest known list.
+* MuShoot: ~3,900 functions, ~133 k instructions, **0 unsupported instructions**.
+
+### Runtime (`runtime/`)
+4 GiB guest space = one pagefile-backed **section** (so GDI can draw into guest memory),
+dispatch by binary search, host thunks for host functions (COM, GetProcAddress), crash handler
+(guest registers, ebp chain), optional call trace (`-DRECOMP_CALLTRACE=ON`, `RC_BREAK=addr,...`),
+`RC_DUMP=addr:len`, `rc_replace_return0_cdecl`.
+
+### Win32 layer (`win32/`) — see docs/DESIGN.md §3
+kernel32 (heap with free quarantine, virtual memory, threads with own CPU/stack/TEB, never-reused
+kernel handles, GetVersion = XP), user32 (virtual windows, message queue from SDL, capture with
+WM_CAPTURECHANGED, painting, cursors from guest resources, wsprintf), gdi32 (forwarded; DIB
+sections in guest memory), winmm (mmio/midiOut/joy forwarded, timeGetTime = engine clock, no
+mixer/CD), advapi32 (registry in %APPDATA%\<settings>.ini, RegKey format), version (none),
+ddraw (mode change no-op), dsound.c (DirectSound on SDL audio), movie.cpp (MCIWnd on
+platform::Movie), window.cpp (platform::Window + `--autoplay` scripts, PNG shots),
+module.c (images, DllMain order, LoadLibrary/GetProcAddress, resources).
+
+### Tests
+* `test_mushoot_crt` (3275 checks: CRT string/memory functions, x87 helpers) — `RECOMP_BUILD_TESTS`.
+* `tools/difftest.py` + `difftest`: every self-contained function vs Unicorn on random states:
+  all agree except 6 known x87-flag helpers.
+
+## How to work on it
 ```
-cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc -DGAME_DIR="D:/Desktop/GAME SHOTS/zzz-ZUGHI/MUSHOOT"
-cmake --build build && build\test_mushoot_crt build\gen
+cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ ^
+      -DGAME_DIR="D:/Desktop/GAME SHOTS/zzz-ZUGHI/MUSHOOT" -DGAME_EXE=mushoot ^
+      -DSDL2_DIR=E:/RE_Tools/SDL2/cmake -DRAPTURE_ENGINE_DIR=../rapture-engine
+cmake --build build
+build\mushoot.exe --autoplay script.txt --outdir OUT [--fast 4] [--settings OUT\s.ini] [--log|--log2]
 ```
-(`pefile` is in the user site-packages: do not run Python with `-I`.)
+* Never start it with a visible window without telling the user first; use `--autoplay`.
+  Always pass `--settings` (else the real %APPDATA% file is used) and an absolute or relative
+  `--outdir` (resolved before the program enters the game folder).
+* Script commands: `wait ms`, `move/click/rclick/down/up x y`, `key name`, `shot name`, `quit`.
+  With `--fast N` game time runs N times faster but audio (speech, movies) stays real time.
+* Debugging a crash: rebuild with `-DRECOMP_CALLTRACE=ON`; the fault report shows the ebp chain;
+  `RC_BREAK=<guest addr>` prints the call stack whenever that function is entered. A local,
+  private script maps guest addresses to the Ghidra function names (not in this repo).
+* `pefile`/`capstone`/`unicorn` are in the user site-packages: do not run Python with `-I`.
 
-## Decisions
+## Decisions (this session)
+* Win32: forward what is pure or memory-based, emulate pointer/presentation-bound APIs.
+* Quarantine + GetVersion XP + `__sbh_alloc_block` replaced: the games read freed objects
+  right after deleting them (Aaron's scene message queues in `Window::LoadScene`).
+* No change was needed in rapture-engine (only `platform/` is used: Window, Movie, Surface), so
+  nothing was merged there and the engine pointers of the dev/port repositories are unchanged.
 
-* Recompiler in Python (fastest to write; the build needs Python anyway). A C decoder
-  (Zydis) can replace capstone later if dropping the pip dependency matters.
-* No 32-bit toolchain on the machine: 64-bit host, guest = `rc_mem + addr`.
-* Flags eager but local: relies on gcc dead-store elimination. Revisit only if code size
-  or compile time becomes a problem.
-* Static rebasing at recompile time, so no runtime relocation.
-
-## Next steps (in order)
-
-1. ~~Discovery quality~~ (done, session 2): trusted seeds (entry, exports, extras, their
-   callees) vs candidates (code pointers in data, code-pointing immediates of accepted
-   functions), candidates rejected if their body has instructions MSVC never emits or they
-   start inside an accepted function; the exe (no relocations) scans aligned data dwords
-   and bounds jump tables by distance.
-2. ~~x87 subset~~ (done, session 2): 8 `double` registers + TOP in `CPU`, status word
-   condition codes (fcom/fxam/ftst, fnstsw, sahf/lahf), control word (fldcw/fnstcw,
-   rounding for fist/frndint), m32/m64/m80 loads and stores (80-bit converted in
-   software), arithmetic in all forms, fpatan/fscale/fsqrt. Also xlatb, narrow rotates,
-   `lock` prefix. **0 unsupported instructions** left in the 4 MuShoot modules.
-   Tests: Aaron.dll `_ftol` (rounding mode switch, edx:eax, cw restored), `_CIsqrt` and
-   `_CIatan2` (all quadrants, x = 0) pass: **3275 checks, 0 failures**.
-   **capstone 5 pitfall**: its x87 register operands are wrong (`fxch st(1)` reports
-   operand `st(0)`); `x86c.py` takes st(i) from the ModRM byte and the destination from
-   the opcode (D8: st(0); DC/DE: st(i)). Mnemonics (fsub vs fsubr) are correct.
-   Session 3: the x87 registers are now `long double` (exact 80-bit on x86-64 GCC) with
-   the precision control of cw applied to arithmetic results (`FPREC`).
-3. ~~Direct import calls~~ (done, session 3): `call/jmp [IAT slot]` -> direct C call of the
-   guest export, or `rc_call_import(c, idx)` for system imports, resolved lazily by name in
-   the HLE tables (`rc_hle_tables`, `win32/`). `rc_host_thunk(fn, name)` hands out guest
-   addresses for host functions (COM vtables, GetProcAddress). `dispatch.c` now also has
-   `rc_export_table` and the module entry points.
-4. ~~Differential testing with Unicorn~~ (done, session 3): `tools/difftest.py` + the
-   `difftest` runner. Selects the self-contained functions (call closure without system
-   imports or non-table indirect calls: ~700), random states, keeps those Unicorn finishes
-   cleanly, compares registers, scratch, stack window and module images (CRC32).
-   Result: **all agree** except 6 known CRT math helpers (empty x87 registers, x87
-   exception flags), listed in `configs/mushoot.toml` `[difftest]`.
-   ```
-   python tools/difftest.py configs/mushoot.toml --game-dir DIR --gen build/gen --runner build/difftest.exe --cases 16
-   ```
-5. **Win32 layer** (C, in `runtime/win32/`), order: KERNEL32 heap/env/locale for the CRT
-   startup (`_DllMainCRTStartup` of each module) -> USER32 window + message loop -> GDI
-   DIB sections + BitBlt -> WINMM mmio/time -> registry/ini -> DirectSound/MIDI (or HLE of
-   moses' audio engines) -> joystick -> AVI -> About dialog. Back ends from
-   `rapture-engine/platform` (clone it into `_recomp/` on a `recomp` branch if changes are
-   needed; never push its master).
-6. Boot `Shoot.exe` -> title -> `Shoot.dll`; then compare with the hand port via autoplay.
-7. `build.bat` in the public `mushoot-rapture-port` calling this recompiler.
+## Open points / next steps
+1. **Not verified**: music (midiOut to the Windows synthesizer: silent in autoplay), the visible
+   window (scaling, fullscreen, cursor shapes), joysticks, the effect of the Audio dialog
+   toggles, the "No" path of "Play again?" (title, credits) and a full Save/Restore cycle.
+2. Mixer API is not emulated (WaveVol/MidiVol are saved as 0; no effect on the sound).
+3. The About box (DialogBoxParamA) is not shown.
+4. Gameplay pacing vs. the hand port: in our runs the game reached level 5-6 before game over,
+   the hand port's run ended at level 3; Hun targets are random (seeded by time), so compare
+   several runs (or seed both identically) before calling it a bug.
+5. The other three games: add `configs/<game>.toml` (bases, title, settings, the
+   `__sbh_alloc_block` address of each module: same moses/Aaron/exe addresses), then a port.
+6. Build speed: rapture-engine's whole library is compiled although only `platform/` is used.
 
 ## Rules
-
-* Nothing derived from the games in git: check `git ls-files` before every push.
-* Repository is **private** until the user reviews it.
+* Nothing derived from the games in git: check `git ls-files` and grep before every push.
+* Repository is **private** until the user reviews it. No LICENSE yet (user's decision).
 * Commit messages end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
