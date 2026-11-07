@@ -21,11 +21,14 @@ Updated: 2026-11-07 (first session).
   (binary search), `rc_invoke`, faults.
 * `configs/mushoot.toml`: bases exe 0x400000, Shoot.dll 0x10000000, moses 0x10100000,
   Aaron 0x10200000.
-* MuShoot numbers: shoot.exe 53 functions (no relocs: discovery incomplete), shoot.dll
-  1202, moses.dll 736, aaron.dll 1371; ~116 k instructions; 219 system imports; 578
-  "unsupported" lines in the report, mostly data decoded as code from bogus seeds
-  (`pop es`, `in`, `das`...) plus the real x87 subset (fld/fstp/fnstsw/sahf/fldcw...).
-  All generated C compiles (gcc -O1, ~8 s with Ninja).
+* MuShoot numbers (session 2): shoot.exe 680 functions / 41 jump tables, shoot.dll 1174 / 40,
+  moses.dll 712 / 41, aaron.dll 1351 / 47; ~133 k instructions; 219 system imports; 250
+  unsupported instructions, almost all x87. All generated C compiles (gcc -O1).
+* Discovery check against the private Ghidra function lists (counts only, done locally):
+  the remaining differences are SEH filter/handler blocks that we find and Ghidra does not
+  (reached only through scope tables), dead code with no reference at all (23 in the exe,
+  ~25 in Shoot.dll), and bodies reached by a tail `jmp` that we merge into the caller as a
+  label (duplicated, not lost).
 * `tests/test_mushoot_crt.c`: 3194 checks pass: Shoot.dll's strlen, strcpy, strcat,
   two memcpy/memmove variants (jump tables, overlap both directions), memset, and the
   code-page -> LCID lookup, compared against host libc; also checks callee-saved registers.
@@ -48,10 +51,11 @@ cmake --build build && build\test_mushoot_crt build\gen
 
 ## Next steps (in order)
 
-1. **Discovery quality**: drop seeds that decode to garbage (privileged/segment
-   instructions, `in/out`, `das`, `aam`...), compare function counts with the private
-   Ghidra lists (counts only), add the exe's vtable scan (`mov [reg], imm` with imm in
-   `.rdata` -> slots in `.text`).
+1. ~~Discovery quality~~ (done, session 2): trusted seeds (entry, exports, extras, their
+   callees) vs candidates (code pointers in data, code-pointing immediates of accepted
+   functions), candidates rejected if their body has instructions MSVC never emits or they
+   start inside an accepted function; the exe (no relocations) scans aligned data dwords
+   and bounds jump tables by distance.
 2. **x87 subset** (`fld/fst/fstp/fild/fistp/fadd/fsub/fmul/fdiv/fcomp/fnstsw/sahf/fldcw/
    fchs/fabs/fxch`): an 8-entry `double` stack in `CPU`, control/status word.
 3. **Direct import calls**: `call [IAT]` where the slot is a guest export -> direct C call
