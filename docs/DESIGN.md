@@ -43,9 +43,14 @@ Three options were considered:
    ABI problem, and calling the real Win32/DirectX reproduces the original's problems on
    modern Windows.
 
-`rapture-engine` stays useful in three ways: its platform layer is the back end of the Win32
-emulation, its hand-ported classes are the reference documentation, and it is a
-differential-testing oracle (same autoplay scripts on both). A function-replacement hook
+**Role of `rapture-engine` under B.** The hand-written moses/Aaron/Arcade/host code of
+`rapture-engine` **no longer runs the games**: in the recompiled build the games run on the
+recompiled original `moses.dll` and `Aaron.dll`. The hand port becomes the **reference**
+(documentation of what each engine function does) and the **test oracle** (the same autoplay
+scripts run on the hand port and on the recompiled build, and their results are compared).
+What is still linked and executed is `rapture-engine`'s `platform/` layer (SDL2 window,
+audio, MIDI, AVI, joystick) and its Win32-replacement helpers (software GDI, text, EMF,
+ini/registry), used as back ends of the Win32 emulation. A function-replacement hook
 (per-game config: "guest address -> host function") lets hot loops, the moses audio threads
 or CRT routines be replaced by native code where that is simpler.
 
