@@ -1,6 +1,6 @@
 # HANDOFF
 
-Updated: 2026-11-07 (first session).
+Updated: 2026-11-07 (second session: steps 1 and 2 done).
 
 ## State
 
@@ -62,13 +62,11 @@ cmake --build build && build\test_mushoot_crt build\gen
    rounding for fist/frndint), m32/m64/m80 loads and stores (80-bit converted in
    software), arithmetic in all forms, fpatan/fscale/fsqrt. Also xlatb, narrow rotates,
    `lock` prefix. **0 unsupported instructions** left in the 4 MuShoot modules.
-   Tests: Aaron.dll `_ftol` (rounding mode switch, edx:eax, cw restored) and `_CIsqrt` pass.
-   **Open: `_CIatan2` (0x1021548a) fails for x < 0 and for x = 0** (3 cases in
-   `test_x87`): the handler 0x102175ac is reached (RC_TRACE=1 shows it) but the sign/
-   quadrant fix-up is wrong. Suspects: the `fxam` C1 bit as read back by `fnstsw m16`
-   + `shl/sar/rol ch` (check which byte of the status word lands in cl/ch), or the
-   x = 0 handler 0x10217605/0x10217996 (`fstp st(0)` pops). Debug by printing ecx and
-   ST(0..1) at the handler entry (edit the generated file in build/, not the generator).
+   Tests: Aaron.dll `_ftol` (rounding mode switch, edx:eax, cw restored), `_CIsqrt` and
+   `_CIatan2` (all quadrants, x = 0) pass: **3275 checks, 0 failures**.
+   **capstone 5 pitfall**: its x87 register operands are wrong (`fxch st(1)` reports
+   operand `st(0)`); `x86c.py` takes st(i) from the ModRM byte and the destination from
+   the opcode (D8: st(0); DC/DE: st(i)). Mnemonics (fsub vs fsubr) are correct.
 3. **Direct import calls**: `call [IAT]` where the slot is a guest export -> direct C call
    (now goes through `rc_call`).
 4. **Differential testing with Unicorn** (`pip install unicorn`): run the same guest function

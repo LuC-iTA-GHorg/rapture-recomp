@@ -420,11 +420,21 @@ class Translator:
         return [f"while (c->ecx) {{ {one} c->ecx--; {stop} }}"]
 
     # -- x87 -------------------------------------------------------------
+    @staticmethod
+    def _sti(i) -> int | None:
+        """Index i of st(i) for a register-form x87 instruction, from the ModRM
+        byte. capstone 5 reports wrong x87 register operands (`fxch st(1)` has
+        operand st(0)), so the operand list is never used for st(i)."""
+        b = i.bytes
+        if len(b) >= 2 and 0xD8 <= b[-2] <= 0xDF and b[-1] >= 0xC0:
+            return b[-1] & 7
+        return None
+
     def _st(self, i, op) -> int:
-        name = i.reg_name(op.reg)
-        if not name.startswith("st"):
-            raise Unsupported(f"x87 operand {name}")
-        return int(name[3]) if "(" in name else 0
+        k = self._sti(i)
+        if k is None:
+            raise Unsupported("x87 register operand without ModRM")
+        return k
 
     def _fmem_rd(self, i, op, integer: bool) -> str:
         e = self.ea(i, op)
@@ -485,7 +495,7 @@ class Translator:
             w = {16: "wr16", 32: "wr32", 64: "wr64"}[b]
             return [f"{w}({self.ea(i, op)}, ({UTYPE.get(op.size, 'uint64_t')})rc_fist(c, ST(0), {b}));{pop}"]
         if mn == "fxch":
-            k = self._st(i, ops[0]) if ops else 1
+            k = self._st(i, None)
             return [f"{{ double t = ST(0); ST(0) = ST({k}); ST({k}) = t; }}"]
         if mn in ("fchs", "fabs", "fsqrt", "frndint"):
             f = {"fchs": "-ST(0)", "fabs": "fabs(ST(0))", "fsqrt": "sqrt(ST(0))", "frndint": "rc_fround(c, ST(0))"}[mn]
@@ -505,7 +515,7 @@ class Translator:
             if ops and ops[0].type == X.X86_OP_MEM:
                 b = self._fmem_rd(i, ops[0], mn.startswith("fi"))
             else:
-                b = f"ST({self._st(i, ops[0]) if ops else 1})"
+                b = f"ST({self._st(i, None)})"
             return [f"fcmp(c, ST(0), {b});" + " fpop(c);" * npop]
         base = mn.rstrip("p") if mn not in ("fsubp", "fsubrp", "fdivp", "fdivrp", "faddp", "fmulp") else mn[:-1]
         if base.startswith("fi") and base[2:] in ("add", "sub", "subr", "mul", "div", "divr"):
@@ -520,11 +530,10 @@ class Translator:
         if len(ops) == 1 and ops[0].type == X.X86_OP_MEM:
             s_ = self._fmem_rd(i, ops[0], integer)
             return [f"ST(0) = {expr.format(d='ST(0)', s=s_)};"]
-        if len(ops) == 0:            # faddp etc. without operands = st(1), st(0)
-            di, si = 1, 0
-        elif len(ops) == 1:
-            di, si = (self._st(i, ops[0]), 0) if pop else (0, self._st(i, ops[0]))
-        else:
-            di, si = self._st(i, ops[0]), self._st(i, ops[1])
+        k = self._sti(i)
+        if k is None:
+            raise Unsupported("x87 arithmetic form")
+        # D8: st(0) = st(0) op st(i); DC/DE: st(i) = st(i) op st(0) (DE pops).
+        di, si = (0, k) if i.bytes[-2] == 0xD8 else (k, 0)
         out = f"ST({di}) = {expr.format(d=f'ST({di})', s=f'ST({si})')};"
         return [out + (" fpop(c);" if pop else "")]
