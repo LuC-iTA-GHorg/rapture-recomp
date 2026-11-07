@@ -1,0 +1,46 @@
+# rapture-recomp config for Disney's Flying Frenzy (1999).
+# Only file names, guest bases and addresses: no code or data of the game.
+# The user's original files are read from --game-dir at build time.
+
+game = "flying"
+title = "Flying Frenzy"
+# Settings (the registry of the original) are kept in %APPDATA%\<settings>.
+settings = "FlyingFrenzy/flying-recomp.ini"
+
+# Guest bases: same layout as MuShoot (Frenzy.dll, moses.dll and Aaron.dll all
+# prefer 0x10000000; moses and Aaron are rebased statically).
+[[module]]
+file = "Flying.exe"
+base = "0x00400000"
+
+[[module]]
+file = "Frenzy.dll"
+base = "0x10000000"
+
+[[module]]
+file = "moses.dll"
+base = "0x10100000"
+
+[[module]]
+file = "Aaron.dll"
+base = "0x10200000"
+
+# Function entries the discovery pass cannot find on its own (none yet).
+[extra_functions]
+
+# Differential test: moses.dll and Aaron.dll are the same files as MuShoot's,
+# so the same Aaron.dll x87-flag helpers differ (see configs/mushoot.toml).
+[difftest]
+known_differences = ["0x102179cd", "0x102179cf", "0x102179f7", "0x1021aef1", "0x1021aeff", "0x1021af31"]
+
+# VC6 small-block heap of every module made to fail (__sbh_alloc_block), so
+# that all allocations reach the Win32 layer's heap with its free quarantine
+# (see configs/mushoot.toml for why).
+[replace."Flying.exe"]
+"0x0041235f" = "return0_cdecl"
+[replace."Frenzy.dll"]
+"0x1001eced" = "return0_cdecl"
+[replace."moses.dll"]
+"0x1000e21d" = "return0_cdecl"
+[replace."Aaron.dll"]
+"0x10015ddd" = "return0_cdecl"
