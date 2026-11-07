@@ -10,7 +10,8 @@
 //
 // Script (one command per line, '#' comment; coordinates in 640x480):
 //   wait MS | move X Y | click X Y | rclick X Y | down X Y | up X Y
-//   key NAME (space esc enter tab backspace up down left right f1..f12 a..z 0..9)
+//   key NAME (space esc enter tab backspace up down left right shift ctrl alt f1..f12 a..z 0..9)
+//   keydown NAME | keyup NAME (hold a key, e.g. to steer: GetKeyState sees it held)
 //   shot NAME (writes OUTDIR/NAME.png) | quit
 #include "w32.h"
 
@@ -46,7 +47,7 @@ int KeyFromName(const std::string& n) {
         {"space", SDLK_SPACE}, {"esc", SDLK_ESCAPE}, {"escape", SDLK_ESCAPE}, {"enter", SDLK_RETURN},
         {"return", SDLK_RETURN}, {"tab", SDLK_TAB}, {"backspace", SDLK_BACKSPACE}, {"up", SDLK_UP},
         {"down", SDLK_DOWN}, {"left", SDLK_LEFT}, {"right", SDLK_RIGHT}, {"plus", SDLK_KP_PLUS},
-        {"minus", SDLK_KP_MINUS}, {"shift", SDLK_LSHIFT}, {"ctrl", SDLK_LCTRL},
+        {"minus", SDLK_KP_MINUS}, {"shift", SDLK_LSHIFT}, {"ctrl", SDLK_LCTRL}, {"alt", SDLK_LALT},
     };
     for (auto& k : names) if (n == k.name) return k.key;
     if (n.size() >= 2 && n[0] == 'f' && isdigit((unsigned char)n[1])) return SDLK_F1 + std::atoi(n.c_str() + 1) - 1;
@@ -67,9 +68,9 @@ bool LoadScript(const char* path) {
         Cmd c;
         c.line = ln;
         if (!(ss >> c.op)) continue;
-        if (c.op == "key" || c.op == "shot") ss >> c.s;
+        if (c.op == "key" || c.op == "keydown" || c.op == "keyup" || c.op == "shot") ss >> c.s;
         else ss >> c.a >> c.b;
-        if (c.op == "key" && !KeyFromName(c.s)) { std::fprintf(stderr, "autoplay: line %d: unknown key %s\n", ln, c.s.c_str()); return false; }
+        if ((c.op == "key" || c.op == "keydown" || c.op == "keyup") && !KeyFromName(c.s)) { std::fprintf(stderr, "autoplay: line %d: unknown key %s\n", ln, c.s.c_str()); return false; }
         g_script.push_back(c);
     }
     return true;
@@ -152,6 +153,9 @@ void RunScript() {
             Push(W32_EV_KEYDOWN, g_mx, g_my, 0, k);
             Push(W32_EV_KEYUP, g_mx, g_my, 0, k, 120);
             g_wait_until = now + 200;
+        } else if (c.op == "keydown" || c.op == "keyup") {
+            Push(c.op == "keydown" ? W32_EV_KEYDOWN : W32_EV_KEYUP, g_mx, g_my, 0, KeyFromName(c.s));
+            g_wait_until = now + settle;
         } else if (c.op == "shot") {
             std::string p = g_outdir + "/" + c.s + ".png";
             if (!WritePng(p, g_win.Framebuffer())) std::fprintf(stderr, "autoplay: cannot write %s\n", p.c_str());
