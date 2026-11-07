@@ -38,7 +38,8 @@ size_t g_pc = 0;
 bool g_scripted = false;
 uint32_t g_wait_until = 0;
 int g_mx = 320, g_my = 240;
-std::vector<w32_host_event> g_pending;
+struct Pending { w32_host_event e; uint32_t due; };
+std::vector<Pending> g_pending;   // scripted events, in order, each due at a game time
 
 int KeyFromName(const std::string& n) {
     static const struct { const char* name; int key; } names[] = {
@@ -74,10 +75,13 @@ bool LoadScript(const char* path) {
     return true;
 }
 
-void Push(int type, int x, int y, int button, int key) {
+// Queue a scripted event `delay` ms from now: a press and its release are kept
+// apart like a person's, so the game runs frames in between (Aaron's buttons
+// need to see the pressed state).
+void Push(int type, int x, int y, int button, int key, uint32_t delay = 0) {
     w32_host_event e{};
     e.type = type; e.x = x; e.y = y; e.button = button; e.key = key;
-    g_pending.push_back(e);
+    g_pending.push_back({e, Window::Ticks() + delay});
 }
 
 void Put32(std::vector<uint8_t>& v, uint32_t x) { for (int i = 3; i >= 0; --i) v.push_back(uint8_t(x >> (8 * i))); }
@@ -138,17 +142,16 @@ void RunScript() {
             int btn = c.op == "click" ? 1 : 3;
             g_mx = c.a; g_my = c.b;
             Push(W32_EV_MOUSEMOVE, c.a, c.b, 0, 0);
-            Push(W32_EV_MOUSEDOWN, c.a, c.b, btn, 0);
-            Push(W32_EV_MOUSEUP, c.a, c.b, btn, 0);
-            g_wait_until = now + settle;
+            Push(W32_EV_MOUSEDOWN, c.a, c.b, btn, 0, 80);
+            Push(W32_EV_MOUSEUP, c.a, c.b, btn, 0, 200);
+            g_wait_until = now + 300;
         } else if (c.op == "down") { Push(W32_EV_MOUSEDOWN, c.a, c.b, 1, 0); g_wait_until = now + settle; }
         else if (c.op == "up") { Push(W32_EV_MOUSEUP, c.a, c.b, 1, 0); g_wait_until = now + settle; }
         else if (c.op == "key") {
             int k = KeyFromName(c.s);
             Push(W32_EV_KEYDOWN, g_mx, g_my, 0, k);
-            if (k >= 32 && k < 127) { w32_host_event e{}; e.type = W32_EV_TEXT; e.text = k; g_pending.push_back(e); }
-            Push(W32_EV_KEYUP, g_mx, g_my, 0, k);
-            g_wait_until = now + settle;
+            Push(W32_EV_KEYUP, g_mx, g_my, 0, k, 120);
+            g_wait_until = now + 200;
         } else if (c.op == "shot") {
             std::string p = g_outdir + "/" + c.s + ".png";
             if (!WritePng(p, g_win.Framebuffer())) std::fprintf(stderr, "autoplay: cannot write %s\n", p.c_str());
@@ -194,8 +197,8 @@ extern "C" int w32_host_poll(w32_host_event* ev) {
         InputEvent drop;
         if (g_open) while (g_win.PollEvent(drop)) {}   // keep SDL alive; real input is ignored
         if (g_pending.empty()) RunScript();
-        if (g_pending.empty()) return 0;
-        *ev = g_pending.front();
+        if (g_pending.empty() || g_pending.front().due > Window::Ticks()) return 0;
+        *ev = g_pending.front().e;
         g_pending.erase(g_pending.begin());
         return 1;
     }

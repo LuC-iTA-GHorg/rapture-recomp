@@ -21,6 +21,7 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--gen") && i + 1 < argc) snprintf(gen, sizeof gen, "%s", argv[++i]);
         else if (!strcmp(argv[i], "--log")) w32_log_level = 1;
+        else if (!strcmp(argv[i], "--log2")) w32_log_level = 2;
         else if (!strcmp(argv[i], "--trace") && i + 1 < argc) rc_trace = atoi(argv[++i]);
     }
     if (!gen[0]) {

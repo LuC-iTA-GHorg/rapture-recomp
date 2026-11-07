@@ -650,6 +650,8 @@ static void u_DispatchMessageA(CPU *c) {
         if (w) w->invalid = 0;   /* a WM_PAINT handler that never calls BeginPaint would loop forever */
         RET(1, r);
     }
+    if (w32_log_level > 1 && msg != WM_MOUSEMOVE && msg != WM_SETCURSOR)
+        W32_LOG("dispatch %08x msg %04x wp %08x lp %08x", hwnd, msg, rd32(p + 8), rd32(p + 12));
     RET(1, wsend(hwnd, msg, rd32(p + 8), rd32(p + 12)));
 }
 static void u_PostMessageA(CPU *c) {
@@ -674,8 +676,20 @@ static void u_SetFocus(CPU *c) {
 }
 static void u_GetFocus(CPU *c) { RET(0, focus_hwnd); }
 static void u_SetForegroundWindow(CPU *c) { RET(1, 1); }
-static void u_SetCapture(CPU *c) { uint32_t old = capture_hwnd; capture_hwnd = ARG(0); RET(1, old); }
-static void u_ReleaseCapture(CPU *c) { capture_hwnd = 0; RET(0, 1); }
+/* The window losing the capture gets WM_CAPTURECHANGED (Aaron's CursorMgr drops
+   its capturing widget only then). */
+static void u_SetCapture(CPU *c) {
+    uint32_t old = capture_hwnd, n = ARG(0);
+    capture_hwnd = n;
+    if (old && old != n) wsend(old, WM_CAPTURECHANGED, 0, n);
+    RET(1, old);
+}
+static void u_ReleaseCapture(CPU *c) {
+    uint32_t old = capture_hwnd;
+    capture_hwnd = 0;
+    if (old) wsend(old, WM_CAPTURECHANGED, 0, 0);
+    RET(0, 1);
+}
 static void u_GetKeyState(CPU *c) {
     uint32_t vk = ARG(0) & 0xFF;
     uint8_t s = keystate[vk];
