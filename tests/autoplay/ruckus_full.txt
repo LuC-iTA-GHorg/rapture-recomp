@@ -1,0 +1,88 @@
+# Rooftop Ruckus, unattended run (win32/window.cpp script; coordinates in 640x480):
+# intro movies -> title -> New game dialog -> play a little -> Abu stands still
+# until game over -> initials -> high-score table -> "Play again?" No -> credits.
+#   build\ruckus.exe --autoplay tests\autoplay\ruckus_full.txt --outdir OUT --settings OUT\s.ini --fast 4
+# Waits are game milliseconds (movies and speech run in real time).
+wait 2000
+shot a01_movie
+wait 25000
+shot a02_movie
+wait 33000
+shot a03_title
+key space               # skip the spoken introduction
+wait 4000
+shot a04_newgame
+click 175 340           # OK of the New game dialog (repeated: the dialog appears after the speech,
+                        # which runs in real time while waits are game time)
+wait 4000
+click 175 340
+wait 4000
+click 175 340
+wait 4000
+click 175 340
+wait 4000
+click 175 340
+wait 4000
+click 175 340
+wait 4000
+click 175 340
+wait 4000
+click 175 340
+wait 4000
+click 175 340
+wait 4000
+click 175 340
+wait 4000
+click 175 340
+wait 4000
+click 175 340
+wait 3000
+shot b01_level
+key down
+wait 1200
+key right
+wait 1200
+key down
+wait 1200
+key right
+wait 1200
+shot b02_moved
+wait 60000
+shot b03_play
+wait 60000
+shot b04_play
+wait 60000
+shot b05_play
+wait 60000
+shot b06_play
+wait 60000
+shot b07_play
+wait 60000              # game over by now (Abu stands still)
+shot c01_initials
+key space
+wait 600
+key right
+wait 600
+key space
+wait 600
+key right
+wait 600
+key space
+wait 600
+shot c02_typed
+click 226 394           # OK: initials
+wait 3000
+shot c03_table
+click 226 394           # OK: high-score table
+wait 3000
+shot c04_play_again
+click 360 270           # No
+wait 4000
+shot d01_after_no
+wait 8000
+shot d02_credits
+wait 8000
+shot d03_credits
+wait 8000
+shot d04_credits
+quit

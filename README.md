@@ -9,9 +9,11 @@ program.
 This repository contains no game code or data: you must own the original game. Generated
 files live only in your build directory.
 
-**Status:** Disney's MuShoot and Disney's Flounder Quest are playable (see the public
-`mushoot-rapture-port` and `flounder-quest-rapture-port`, which use this repository as a
-submodule; Flounder Quest: `-DGAME_CONFIG=configs/flounder.toml -DGAME_EXE=flounder`). Design: [docs/DESIGN.md](docs/DESIGN.md); state and next
+**Status:** all four games are playable: Disney's MuShoot, Flying Frenzy, Flounder Quest and
+Rooftop Ruckus (public ports `mushoot-rapture-port`, `flying-frenzy-rapture-port`,
+`flounder-quest-rapture-port`, `rooftop-ruckus-rapture-port`, which use this repository as a
+submodule; per-game settings in `configs/<game>.toml`, e.g. `-DGAME_CONFIG=configs/flounder.toml
+-DGAME_EXE=flounder`). Design: [docs/DESIGN.md](docs/DESIGN.md); state and next
 steps: [HANDOFF.md](HANDOFF.md).
 
 ## Requirements
