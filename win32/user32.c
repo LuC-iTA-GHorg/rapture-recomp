@@ -143,6 +143,10 @@ void w32_pump_host_events(void) {
     static int in_pump;
     if (in_pump) return;
     in_pump = 1;
+    extern void w32_movie_tick(void);
+    extern void w32_poll_joysticks(void);
+    w32_movie_tick();
+    w32_poll_joysticks();
     w32_screen_present_if_dirty();
     w32_host_event e;
     while (w32_host_poll(&e)) {
@@ -354,6 +358,31 @@ void w32_destroy_window(uint32_t hwnd) {
     if (active_hwnd == hwnd) active_hwnd = 0;
 }
 
+/* A child window whose window procedure is host code (MCIWnd): wndproc is a
+   host thunk address. Returns the HWND or 0. */
+uint32_t w32_create_child(uint32_t parent, uint32_t wndproc, int x, int y, int w_, int h_) {
+    int i;
+    for (i = 0; i < MAX_WINDOWS && windows[i].used; i++) {}
+    if (i >= MAX_WINDOWS) return 0;
+    wnd *w = &windows[i];
+    memset(w, 0, sizeof *w);
+    w->used = 1; w->cls = 0; w->wndproc = wndproc; w->style = WS_CHILD | WS_VISIBLE; w->parent = parent;
+    w->enabled = 1; w->visible = 1;
+    w->x = x; w->y = y; w->w = w_; w->h = h_;
+    return HW(w);
+}
+void w32_window_screen_rect(uint32_t hwnd, int *x, int *y, int *w_, int *h_) {
+    extern void w32_origin(uint32_t, int *, int *);
+    wnd *w = W(hwnd);
+    w32_origin(hwnd, x, y);
+    *w_ = w ? w->w : 0;
+    *h_ = w ? w->h : 0;
+}
+int w32_window_visible(uint32_t hwnd) {
+    for (wnd *w = W(hwnd); w; w = W(w->parent)) if (!w->visible) return 0;
+    return W(hwnd) != NULL;
+}
+
 static void u_DestroyWindow(CPU *c) { w32_destroy_window(ARG(0)); RET(1, 1); }
 static void u_ShowWindow(CPU *c) {
     wnd *w = W(ARG(0));
@@ -465,7 +494,9 @@ static void u_SetWindowPlacement(CPU *c) {
     w32_show(ARG(0), (int)rd32(p + 8));
     RET(2, 1);
 }
-static void origin(uint32_t hwnd, int *ox, int *oy) {
+void w32_origin(uint32_t hwnd, int *ox, int *oy);
+static void origin(uint32_t hwnd, int *ox, int *oy) { w32_origin(hwnd, ox, oy); }
+void w32_origin(uint32_t hwnd, int *ox, int *oy) {
     *ox = *oy = 0;
     for (wnd *w = W(hwnd); w; w = W(w->parent)) { *ox += w->x; *oy += w->y; }
 }
