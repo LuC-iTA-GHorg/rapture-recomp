@@ -148,7 +148,8 @@ class Translator:
         missing = [t for t in need_labels if t not in f.insns]
         lines = [f"void {fname(f.entry)}(CPU *c) {{",
                  "    uint32_t cf = 0, zf = 0, sf = 0, of = 0, pf = 0;",
-                 "    (void)cf; (void)zf; (void)sf; (void)of; (void)pf;"]
+                 "    (void)cf; (void)zf; (void)sf; (void)of; (void)pf;",
+                 f"    RC_ENTER(0x{f.entry:x}u);"]
         if f.entry != addrs[0]:
             lines.append(f"    goto L_{f.entry:08x};")
         for a, i, code in body:

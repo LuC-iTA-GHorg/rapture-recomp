@@ -73,7 +73,20 @@ def main(argv=None) -> int:
             fh.write(m.image)
 
     selected = set(x.strip().lower() for x in a.modules.split(",")) if a.modules else set(by_name)
-    extra = {k.lower(): [int(x, 0) for x in v] for k, v in conf.get("extra_functions", {}).items()}
+    # Addresses in the config are those of the original files (preferred image base).
+    def rebase(modname: str, addr: int) -> int:
+        mm = by_name[modname.lower()]
+        return (addr - mm.pref_base + mm.base) & 0xFFFFFFFF
+
+    extra = {k.lower(): [rebase(k, int(x, 0)) for x in v] for k, v in conf.get("extra_functions", {}).items()}
+    # Function replacement: [replace.<module>] "0xADDR" = "name" -> the guest function's body
+    # becomes a call to the host function rc_replace_<name>(CPU *) (runtime or Win32 layer).
+    replace: dict[int, str] = {}
+    for modname, table in conf.get("replace", {}).items():
+        for addr, name in table.items():
+            replace[rebase(modname, int(addr, 0))] = name
+    for e in replace:
+        extra.setdefault(next(m.name for m in mods if m.contains(e)), []).append(e)
 
     funcs: dict[int, cfg.Function] = {}
     report = []
@@ -91,6 +104,10 @@ def main(argv=None) -> int:
     bodies = []
     unimpl = []
     for e in sorted(funcs):
+        if e in replace:
+            bodies.append(f"void rc_replace_{replace[e]}(CPU *c);\n"
+                          f"void {fname(e)}(CPU *c) {{ RC_ENTER(0x{e:x}u); rc_replace_{replace[e]}(c); }}")
+            continue
         t = Translator(funcs[e], known, iat)
         bodies.append(t.translate())
         unimpl.extend(t.unimpl)
@@ -137,7 +154,11 @@ def main(argv=None) -> int:
                 fh.write(f"  {{{k}u, {nm}, {o}u, 0x{ad:08x}u}},\n")
                 nexp += 1
         fh.write("  {0, 0, 0, 0}\n};\n")
-        fh.write(f"const uint32_t rc_export_count = {nexp};\n")
+        fh.write(f"const uint32_t rc_export_count = {nexp};\n\n")
+        title = conf.get("title", conf.get("game", "game")).replace("\\", "\\\\").replace('"', '\\"')
+        settings = conf.get("settings", conf.get("game", "game") + "\\settings.ini").replace("/", "\\").replace("\\", "\\\\")
+        fh.write(f'const char rc_game_title[] = "{title}";\n')
+        fh.write(f'const char rc_game_settings[] = "{settings}";   /* relative to %APPDATA% */\n')
 
     report.append(f"system imports (thunks): {len(thunks)}")
     report.append(f"unsupported instructions: {len(unimpl)}")

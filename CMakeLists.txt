@@ -1,15 +1,24 @@
 cmake_minimum_required(VERSION 3.20)
-project(rapture_recomp C)
+project(rapture_recomp C CXX)
 
 # Usage:
 #   cmake -S . -B build -G Ninja -DGAME_DIR="D:/path/to/MUSHOOT" -DGAME_CONFIG=configs/mushoot.toml
-#   cmake --build build && build/test_mushoot_crt build/gen
+#         -DRAPTURE_ENGINE_DIR=path/to/rapture-engine -DSDL2_DIR=path/to/SDL2/cmake
+#   cmake --build build
+#   (from the game folder)  path\to\build\<game>.exe
 #
-# The recompiler runs at configure/build time on the user's own game files and
-# writes the generated C into the build directory (never into the source tree).
+# The recompiler runs at configure time on the user's own game files and writes
+# the generated C and the rebased images into the build directory (never into
+# the source tree). Tests: build/test_mushoot_crt build/gen, tools/difftest.py.
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(GAME_CONFIG "${CMAKE_SOURCE_DIR}/configs/mushoot.toml" CACHE FILEPATH "game config")
 set(GAME_DIR "" CACHE PATH "folder with the user's original game files")
+set(GAME_EXE "game" CACHE STRING "name of the game executable")
+set(RAPTURE_ENGINE_DIR "${CMAKE_SOURCE_DIR}/../rapture-engine" CACHE PATH "rapture-engine checkout (its platform/ layer is used)")
+option(RECOMP_BUILD_GAME "Build the game executable (needs rapture-engine and SDL2)" ON)
 if(NOT GAME_DIR)
   message(FATAL_ERROR "set -DGAME_DIR to the folder that holds your copy of the game")
 endif()
@@ -29,21 +38,48 @@ file(GLOB GEN_SOURCES "${GEN_DIR}/code_*.c")
 file(GLOB RECOMP_PY "${CMAKE_SOURCE_DIR}/recomp/*.py")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${GAME_CONFIG} ${RECOMP_PY})
 
-add_library(recomp_runtime STATIC runtime/runtime.c win32/hle_tables.c)
-target_include_directories(recomp_runtime PUBLIC runtime)
-
-add_library(game_gen STATIC ${GEN_SOURCES} "${GEN_DIR}/dispatch.c")
-target_include_directories(game_gen PUBLIC "${GEN_DIR}")
-target_link_libraries(game_gen PUBLIC recomp_runtime)
+# Generated code and the runtime, as object libraries (they reference each other).
+add_library(game_gen OBJECT ${GEN_SOURCES} "${GEN_DIR}/dispatch.c")
+target_include_directories(game_gen PUBLIC "${GEN_DIR}" runtime)
 # Generated code: strict aliasing is irrelevant (memcpy accessors), warnings are noise.
-target_compile_options(game_gen PRIVATE -O1 -w -fno-strict-aliasing)
+target_compile_options(game_gen PRIVATE -O2 -w -fno-strict-aliasing)
+option(RECOMP_CALLTRACE "Record the last guest function entries per thread (printed on a fault)" OFF)
+if(RECOMP_CALLTRACE)
+  target_compile_definitions(game_gen PRIVATE RC_CALLTRACE=1)
+endif()
 
-add_executable(test_mushoot_crt tests/test_mushoot_crt.c)
-target_link_libraries(test_mushoot_crt PRIVATE game_gen)
+add_library(recomp_runtime OBJECT runtime/runtime.c)
+target_include_directories(recomp_runtime PUBLIC runtime "${GEN_DIR}")
 
+# Tests (no Win32 layer: tests/hle_none.c provides an empty HLE table).
+add_executable(test_mushoot_crt tests/test_mushoot_crt.c tests/hle_none.c
+               $<TARGET_OBJECTS:game_gen> $<TARGET_OBJECTS:recomp_runtime>)
+target_include_directories(test_mushoot_crt PRIVATE runtime)
 enable_testing()
 add_test(NAME mushoot_crt COMMAND test_mushoot_crt "${GEN_DIR}")
 
 # Differential test runner (driven by tools/difftest.py, which needs unicorn).
-add_executable(difftest tests/difftest.c)
-target_link_libraries(difftest PRIVATE game_gen)
+add_executable(difftest tests/difftest.c tests/hle_none.c
+               $<TARGET_OBJECTS:game_gen> $<TARGET_OBJECTS:recomp_runtime>)
+target_include_directories(difftest PRIVATE runtime)
+
+if(RECOMP_BUILD_GAME)
+  # rapture-engine: only its library target `rapture` is needed (platform/Window for the window).
+  set(RAPTURE_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  if(NOT TARGET SDL2::SDL2)
+    find_package(SDL2 REQUIRED CONFIG)
+  endif()
+  add_subdirectory("${RAPTURE_ENGINE_DIR}" rapture-engine EXCLUDE_FROM_ALL)
+
+  file(GLOB WIN32_SOURCES CONFIGURE_DEPENDS win32/*.c win32/*.cpp)
+  add_executable(${GAME_EXE} ${WIN32_SOURCES} $<TARGET_OBJECTS:game_gen> $<TARGET_OBJECTS:recomp_runtime>)
+  target_include_directories(${GAME_EXE} PRIVATE runtime win32 "${RAPTURE_ENGINE_DIR}")
+  target_link_libraries(${GAME_EXE} PRIVATE rapture SDL2::SDL2 gdi32 winmm msimg32)
+  target_compile_options(${GAME_EXE} PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wno-unused-function>)
+  if(MINGW)
+    target_link_options(${GAME_EXE} PRIVATE -static-libgcc -static-libstdc++)
+  endif()
+  # The rebased images are in build/gen, next to the executable (the default --gen).
+  add_custom_command(TARGET ${GAME_EXE} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:SDL2::SDL2>" "$<TARGET_FILE_DIR:${GAME_EXE}>/")
+endif()

@@ -3,6 +3,9 @@
 # The user's original files are read from --game-dir at build time.
 
 game = "mushoot"
+title = "MuShoot"
+# Settings (the registry of the original) are kept in %APPDATA%\<settings>.
+settings = "MuShoot/mushoot-recomp.ini"
 
 # Guest bases. Shoot.dll, moses.dll and Aaron.dll all prefer 0x10000000,
 # so the recompiler rebases moses and Aaron statically.
@@ -31,3 +34,19 @@ base = "0x10200000"
 # exception flags, which the recompiler does not model.
 [difftest]
 known_differences = ["0x102179cd", "0x102179cf", "0x102179f7", "0x1021aef1", "0x1021aeff", "0x1021af31"]
+
+# Function replacements (addresses of the original files). The VC6 CRT of every
+# module has its own small-block heap, which hands a freed block out again at
+# once; Aaron dispatches the message queue of a scene it has just deleted (the
+# old title scene, inside Window::LoadScene), which only works while freed
+# memory stays intact. Making __sbh_alloc_block fail sends every allocation to
+# HeapAlloc, i.e. to the Win32 layer's heap, which keeps freed blocks intact for
+# a while (like the system heap the CRT uses on Windows 2000 and later).
+[replace."Shoot.exe"]
+"0x0041235f" = "return0_cdecl"
+[replace."Shoot.dll"]
+"0x1001febf" = "return0_cdecl"
+[replace."moses.dll"]
+"0x1000e21d" = "return0_cdecl"
+[replace."Aaron.dll"]
+"0x10015ddd" = "return0_cdecl"

@@ -11,7 +11,10 @@
 #include <string.h>
 
 #ifdef __cplusplus
+#define RC_NORETURN [[noreturn]]
 extern "C" {
+#else
+#define RC_NORETURN _Noreturn
 #endif
 
 typedef struct CPU {
@@ -28,6 +31,21 @@ typedef struct CPU {
 } CPU;
 
 typedef void (*rc_fn)(CPU *c);
+
+/* Optional call trace (compile the generated code with -DRC_CALLTRACE): a
+   per-thread ring of the last guest function entries, printed by rc_fault. */
+#define RC_RING 64
+extern __thread uint32_t rc_ring[RC_RING];
+extern __thread uint32_t rc_ring_pos;
+#ifdef RC_CALLTRACE
+/* RC_BREAK=addr[,addr...] (hex): print the guest call stack whenever one of these functions is entered. */
+extern uint32_t rc_break[8];
+void rc_break_hit(struct CPU *c, uint32_t a);
+#define RC_ENTER(a) do { rc_ring[rc_ring_pos++ & (RC_RING - 1)] = (a); \
+    if (rc_break[0] && (rc_break[0] == (a) || rc_break[1] == (a) || rc_break[2] == (a) || rc_break[3] == (a))) rc_break_hit(c, (a)); } while (0)
+#else
+#define RC_ENTER(a) ((void)0)
+#endif
 typedef long double f80;
 
 extern uint8_t *rc_mem;
@@ -92,11 +110,12 @@ int rc_ieq(const char *a, const char *b);   /* ASCII case-insensitive equality *
 /* Look up a recompiled function; NULL if the address is not a known entry. */
 rc_fn rc_lookup(uint32_t target);
 
-_Noreturn void rc_fault(CPU *c, uint32_t addr, const char *what);
-_Noreturn void rc_unimpl(CPU *c, uint32_t addr, const char *insn);
+RC_NORETURN void rc_fault(CPU *c, uint32_t addr, const char *what);
+RC_NORETURN void rc_unimpl(CPU *c, uint32_t addr, const char *insn);
 
 /* -- memory / process setup (runtime.c) ------------------------------ */
 int  rc_init(void);                              /* reserve the 4 GiB guest space */
+void rc_install_crash_handler(CPU *(*current_cpu)(void));
 int  rc_commit(uint32_t addr, uint32_t size);    /* commit a guest range */
 int  rc_load_image(const char *path, uint32_t base, uint32_t size);
 uint32_t rc_alloc_stack(uint32_t size);          /* returns initial esp */
