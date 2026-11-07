@@ -203,6 +203,7 @@ build\mushoot.exe --autoplay script.txt --outdir OUT [--fast 4] [--settings OUT\
 
 ## Rules
 * Nothing derived from the games in git: check `git ls-files` and grep before every push.
-* Repository is **private** until the user reviews it. No LICENSE yet (user's decision).
+* Repository is **public** (since 2026-11-07): everything in it (code, comments, docs, commit
+  messages) is in English. No LICENSE yet (user's decision): all rights reserved until then.
 * Commit messages end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
