@@ -10,7 +10,8 @@ This repository contains no game code or data: you must own the original game. G
 files live only in your build directory.
 
 **Status:** Disney's MuShoot is playable (see the public `mushoot-rapture-port`, which uses
-this repository as a submodule). Design: [docs/DESIGN.md](docs/DESIGN.md); state and next
+this repository as a submodule); Disney's Rooftop Ruckus is
+playable on branch `ruckus` (`configs/ruckus.toml`, public `rooftop-ruckus-rapture-port`). Design: [docs/DESIGN.md](docs/DESIGN.md); state and next
 steps: [HANDOFF.md](HANDOFF.md).
 
 ## Requirements

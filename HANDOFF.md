@@ -43,6 +43,33 @@ module.c (images, DllMain order, LoadLibrary/GetProcAddress, resources).
 * `tools/difftest.py` + `difftest`: every self-contained function vs Unicorn on random states:
   all agree except 6 known x87-flag helpers.
 
+## Ruckus (branch `ruckus`)
+
+**Disney's Rooftop Ruckus is playable**, built by the public `rooftop-ruckus-rapture-port`
+(`build.bat`, submodule `recomp/` = this branch) from the user's own game files.
+
+* Game-specific files only: `configs/ruckus.toml` (bases as MuShoot; `__sbh_alloc_block`
+  replaced in every module: exe, moses.dll and Aaron.dll at MuShoot's addresses, since the
+  exe's code is identical and moses/Aaron are the same files; Ruckus.dll at its own address,
+  found by a relocation-masked byte match of MuShoot's function) and
+  `tests/autoplay/ruckus_full.txt` (unattended run, coordinates only).
+* Recompiler output: exe 680, Ruckus.dll 1133, moses 712, Aaron 1351 functions;
+  **0 unsupported instructions**.
+* **Changes to common code (`recomp/`, `runtime/`, `win32/`, CMakeLists.txt): none.**
+  MuShoot rebuilt from this branch: builds, `test_mushoot_crt` passes.
+* Verified with `--autoplay tests/autoplay/ruckus_full.txt --fast 4` and compared with the
+  hand port (`gameover.txt` of the dev repository, same screens): intro movies (DILogo,
+  DDLogo), title, spoken intro, New game dialog, level 1 with Abu, Jafar, enemies and items,
+  losing lives, game over, initials entry, high-score table (saved to the .ini), "Play again?",
+  No -> Iago -> credits with fireworks.
+* Not verified: music (MIDI), visible window, joystick/mouse play, Options menu and its
+  sub-dialogs, Save/Restore, levels after the first, two-player mode. WaveVol/MidiVol are
+  saved as 0 (mixer not emulated, as for MuShoot; the hand port writes 100).
+* Script timing: waits are game time, movies and speech real time, so the script clicks the
+  New game OK repeatedly instead of waiting for the dialog.
+* Build: `-DGAME_CONFIG=configs/ruckus.toml -DGAME_EXE=ruckus -DRECOMP_BUILD_TESTS=OFF`
+  (the tests are MuShoot-specific).
+
 ## How to work on it
 ```
 cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ ^
