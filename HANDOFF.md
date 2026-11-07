@@ -161,6 +161,9 @@ From a port, the executable is `build\<game>.exe` of the port and the scripts ar
 exits with 0, and the last shots show the expected screen (credits; Flounder: "Play again?").
 `flounder_settings.ini` sets `FKeys=1` (the F-key cheats) in the `[*]` section, which
 `win32/advapi32.c` uses as defaults for every registry key.
+`flounder_full.txt` steers Sebastian by holding keys, so it depends on the frame rate: run it
+alone (with other games or a build running at the same time Sebastian missed Flounder once and
+the run ended on level 1 with 0 points). A good run saves 1500 points, level 2.
 
 ## How to work on it
 ```
