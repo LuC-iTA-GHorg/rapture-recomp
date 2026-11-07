@@ -208,24 +208,28 @@ def discover(mod: Module, extra: list[int] = ()) -> dict[int, Function]:
     def grow(seeds: list[int], trusted: bool) -> list[int]:
         """Recover seeds and their direct callees; return new candidate pointers."""
         found: list[int] = []
-        pending = list(seeds)
+        pending = [(e, trusted) for e in seeds]
         while pending:
-            e = pending.pop()
+            e, sure = pending.pop()
             if e in funcs or not mod.is_code(e):
                 continue
-            if not trusted and e in covered:
+            if not sure and e in covered:
                 continue
             f = recover(mod, e, known | {e})
             if not f.insns:
                 continue
-            if not trusted and not plausible(f):
+            if not sure and not plausible(f):
                 continue
             accept(f)
             known.add(e)
+            # A direct call or tail jump of an accepted function is a real entry
+            # even when an earlier function already covers it (a body that falls
+            # through a call to a no-return function, e.g. `call _exit`, into the
+            # next function).
             for t in f.calls | f.tail_calls:
                 if t not in funcs:
                     known.add(t)
-                    pending.append(t)
+                    pending.append((t, True))
             found.extend(_code_immediates(mod, f))
         return found
 

@@ -85,3 +85,31 @@ build\mushoot.exe --autoplay script.txt --outdir OUT [--fast 4] [--settings OUT\
 * Nothing derived from the games in git: check `git ls-files` and grep before every push.
 * Repository is **private** until the user reviews it. No LICENSE yet (user's decision).
 * Commit messages end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+
+## Flying (branch `flying`, Disney's Flying Frenzy)
+
+**Playable**, built by the public `flying-frenzy-rapture-port` (`build.bat`, submodule
+`recomp/` = this branch) from the user's own files (`Flying.exe`, `Frenzy.dll`, `moses.dll`,
+`Aaron.dll`; moses/Aaron are the same files as MuShoot's, the exe has the same code layout).
+
+* Config: `configs/flying.toml` (same guest bases as MuShoot; `__sbh_alloc_block` of
+  `Frenzy.dll` at 0x1001eced, of `Flying.exe` at the same address as `Shoot.exe`'s).
+  Recompiled: 682 + 1153 + 712 + 1353 functions, 0 unsupported instructions.
+* Autoplay script `tests/autoplay/flying_full.txt` (`--fast 4`, about 3 minutes):
+  intro movies, title, New game -> OK, a level with the hero idle until game over, initials,
+  high-score table (saved to the .ini), "Play again?" -> No, Phil, credits.
+* Compared with the hand port (`gameover` autoplay of `flying-frenzy-rapture-dev`): same
+  screens, same score/level/difficulty row in the table; name entry and "Play again?"
+  screens identical within 16 levels per channel.
+
+**Changes to common code** (generic, MuShoot rebuilt: `test_mushoot_crt` 3275 checks, 0
+failures; MuShoot autoplay to the New game dialog and into a level):
+* `recomp/cfg.py`: a direct call / tail jump target of an accepted function is always an
+  entry, even when it lies inside an already accepted body. Before, a function that falls
+  through `call _exit` (no return) into the next function hid that next function from the
+  candidate pass, and the direct call to it went through `rc_call` and faulted
+  (`Frenzy.dll`'s `_controlfp`, called by the CRT start-up). Adds 2 functions to the exe and
+  2 to Aaron.dll for MuShoot too (duplicated code, harmless).
+
+**Not verified**: music (MIDI), visible window, 2 players, joystick, the Options menu and its
+dialogs, Save/Restore, levels beyond 2, the "Yes" path of "Play again?".
