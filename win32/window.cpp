@@ -169,7 +169,7 @@ extern "C" int w32_host_parse_args(int argc, char** argv) {
         if (a == "--autoplay" && i + 1 < argc) {
             if (!LoadScript(argv[++i])) return 1;
             g_scripted = true;
-        } else if (a == "--outdir" && i + 1 < argc) g_outdir = argv[++i];
+        } else if (a == "--outdir" && i + 1 < argc) { char full[1024]; g_outdir = _fullpath(full, argv[++i], sizeof full) ? full : argv[i]; }
         else if (a == "--fast" && i + 1 < argc) fast = std::atof(argv[++i]);
         else if (a == "--fullscreen") g_fullscreen = true;
     }
@@ -225,5 +225,69 @@ extern "C" void w32_host_present(const uint32_t* argb) {
 }
 
 extern "C" void w32_host_show_cursor(int show) { if (g_open) g_win.ShowCursor(show != 0); }
+
+// Cursor shape: a host HCURSOR (from a guest cursor resource) becomes an SDL color
+// cursor, scaled with the window; anything else (system cursors) is the SDL arrow.
+#define NOMINMAX
+#include <windows.h>
+#include <map>
+extern "C" void w32_host_set_cursor_shape(uint32_t hcursor) {
+    static std::map<uint32_t, SDL_Cursor*> cache;
+    static uint32_t current = 0;
+    if (!g_open || hcursor == current) return;
+    current = hcursor;
+    SDL_Cursor* cur = nullptr;
+    if (hcursor && (hcursor & 0xFFFF0000u) != 0x00010000u) {
+        auto it = cache.find(hcursor);
+        if (it != cache.end()) cur = it->second;
+        else {
+            HCURSOR hc = (HCURSOR)(intptr_t)(int32_t)hcursor;
+            ICONINFO ii;
+            if (GetIconInfo(hc, &ii)) {
+                BITMAP bm{};
+                GetObject(ii.hbmMask, sizeof bm, &bm);
+                int w = bm.bmWidth, h = ii.hbmColor ? bm.bmHeight : bm.bmHeight / 2;
+                HDC dc = CreateCompatibleDC(nullptr);
+                BITMAPINFO bi{};
+                bi.bmiHeader.biSize = sizeof bi.bmiHeader;
+                bi.bmiHeader.biWidth = w;
+                bi.bmiHeader.biHeight = -h;
+                bi.bmiHeader.biPlanes = 1;
+                bi.bmiHeader.biBitCount = 32;
+                void* bits = nullptr;
+                HBITMAP dib = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+                HGDIOBJ old = SelectObject(dc, dib);
+                // Draw the cursor twice, on black and on white: equal pixels are opaque,
+                // pixels that follow the background are transparent.
+                std::vector<uint32_t> onBlack(size_t(w) * h), onWhite(size_t(w) * h);
+                PatBlt(dc, 0, 0, w, h, BLACKNESS);
+                DrawIconEx(dc, 0, 0, hc, w, h, 0, nullptr, DI_NORMAL);
+                GdiFlush();
+                std::memcpy(onBlack.data(), bits, onBlack.size() * 4);
+                PatBlt(dc, 0, 0, w, h, WHITENESS);
+                DrawIconEx(dc, 0, 0, hc, w, h, 0, nullptr, DI_NORMAL);
+                GdiFlush();
+                std::memcpy(onWhite.data(), bits, onWhite.size() * 4);
+                SelectObject(dc, old);
+                DeleteObject(dib);
+                DeleteDC(dc);
+                SDL_Surface* s = SDL_CreateRGBSurfaceWithFormat(0, w, h, 32, SDL_PIXELFORMAT_ARGB8888);
+                if (s) {
+                    uint32_t* px = static_cast<uint32_t*>(s->pixels);
+                    for (int i = 0; i < w * h; ++i) {
+                        uint32_t b = onBlack[size_t(i)] & 0xFFFFFF, wh = onWhite[size_t(i)] & 0xFFFFFF;
+                        px[i] = b == wh ? (0xFF000000u | b) : 0;
+                    }
+                    cur = SDL_CreateColorCursor(s, int(ii.xHotspot), int(ii.yHotspot));
+                    SDL_FreeSurface(s);
+                }
+                if (ii.hbmColor) DeleteObject(ii.hbmColor);
+                DeleteObject(ii.hbmMask);
+            }
+            cache[hcursor] = cur;
+        }
+    }
+    SDL_SetCursor(cur ? cur : SDL_GetDefaultCursor());
+}
 extern "C" uint32_t w32_host_ticks(void) { return Window::Ticks(); }
 extern "C" int w32_host_scripted(void) { return g_scripted; }

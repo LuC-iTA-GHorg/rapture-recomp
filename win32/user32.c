@@ -733,7 +733,12 @@ static void u_LoadCursorA(CPU *c) {
 static void u_LoadIconA(CPU *c) { RET(2, 0x00010000u | 32512u); }
 static uint32_t cur_cursor;
 static int cursor_shown = 0;   /* ShowCursor counter (0 = visible) */
-void w32_set_cursor(uint32_t h) { cur_cursor = h; w32_host_show_cursor(h != 0 && cursor_shown >= 0); }
+void w32_host_set_cursor_shape(uint32_t hcursor);   /* window.cpp */
+void w32_set_cursor(uint32_t h) {
+    cur_cursor = h;
+    if (h) w32_host_set_cursor_shape(h);
+    w32_host_show_cursor(h != 0 && cursor_shown >= 0);
+}
 static void u_SetCursor(CPU *c) { uint32_t old = cur_cursor; w32_set_cursor(ARG(0)); RET(1, old); }
 static void u_ShowCursor(CPU *c) {
     cursor_shown += ARG(0) ? 1 : -1;
@@ -745,12 +750,13 @@ static void u_ShowCursor(CPU *c) {
 static void u_LoadStringA(CPU *c) {
     uint32_t h = ARG(0), id = ARG(1), buf = ARG(2), n = ARG(3);
     uint32_t sz, blk = w32_find_resource(h, 6 /* RT_STRING */, id / 16 + 1, &sz);
-    if (!blk || !n) { if (n) ((char *)G(buf))[0] = 0; RET(4, 0); }
+    if (!blk || !n) { W32_LOG("LoadString %08x %#x: not found", h, id); if (n) ((char *)G(buf))[0] = 0; RET(4, 0); }
     uint32_t p = blk;
     for (uint32_t i = 0; i < (id & 15); i++) p += 2 + 2u * rd16(p);
     uint32_t len = rd16(p);
     int r = WideCharToMultiByte(CP_ACP, 0, (LPCWSTR)G(p + 2), (int)len, (char *)G(buf), (int)n - 1, NULL, NULL);
     ((char *)G(buf))[r] = 0;
+    W32_LOG("LoadString %08x %#x -> '%s'", h, id, (char *)G(buf));
     RET(4, (uint32_t)r);
 }
 static void u_CharNextA(CPU *c) {

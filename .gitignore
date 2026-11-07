@@ -18,3 +18,4 @@ build.log
 *.DLL
 *.EXE
 *.RRS
+/build-b/

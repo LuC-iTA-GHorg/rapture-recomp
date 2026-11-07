@@ -13,6 +13,7 @@
 void w32_attach_static_dlls(void);
 void w32_set_settings_path(const char *path);
 extern const char rc_game_settings[];
+extern const char rc_game_title[];
 int w32_host_parse_args(int argc, char **argv);   /* window.cpp */
 
 int main(int argc, char **argv) {
@@ -31,13 +32,38 @@ int main(int argc, char **argv) {
     }
     char settings[MAX_PATH * 2] = "";
     for (int i = 1; i < argc; i++)
-        if (!strcmp(argv[i], "--settings") && i + 1 < argc) snprintf(settings, sizeof settings, "%s", argv[++i]);
+        if (!strcmp(argv[i], "--settings") && i + 1 < argc) GetFullPathNameA(argv[++i], sizeof settings, settings, NULL);
     if (!settings[0]) {
         const char *ad = getenv("APPDATA");
         snprintf(settings, sizeof settings, "%s\\%s", ad ? ad : ".", rc_game_settings);
     }
     w32_set_settings_path(settings);
     if (w32_host_parse_args(argc, argv)) return 2;
+
+    /* The game runs in its own folder (the one with the original exe and the data
+       files): --game-dir DIR, else the current folder if it is one, else the folder
+       this executable was built from. */
+    const char *game_dir = NULL;
+    for (int i = 1; i < argc; i++)
+        if (!strcmp(argv[i], "--game-dir") && i + 1 < argc) game_dir = argv[++i];
+    const char *exe_name = rc_module_table[0].name;   /* the original exe comes first in the config */
+    if (!game_dir && GetFileAttributesA(exe_name) == INVALID_FILE_ATTRIBUTES) {
+#ifdef RC_BUILD_GAME_DIR
+        game_dir = RC_BUILD_GAME_DIR;
+#endif
+    }
+    if (game_dir && !SetCurrentDirectoryA(game_dir)) {
+        fprintf(stderr, "cannot enter the game folder %s\n", game_dir);
+        return 2;
+    }
+    if (GetFileAttributesA(exe_name) == INVALID_FILE_ATTRIBUTES) {
+        char msg[512];
+        snprintf(msg, sizeof msg, "The game files (%s and the data files) are not in the current folder.\n"
+                 "Start the game from its folder or pass --game-dir FOLDER.", exe_name);
+        fprintf(stderr, "%s\n", msg);
+        MessageBoxA(NULL, msg, rc_game_title, MB_ICONERROR);
+        return 2;
+    }
     if (rc_init()) { fprintf(stderr, "cannot reserve the guest address space\n"); return 2; }
     CPU *c = w32_main_cpu();
     rc_install_crash_handler(w32_cpu);

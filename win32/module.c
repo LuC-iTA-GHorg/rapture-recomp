@@ -181,7 +181,7 @@ static int res_name_eq(uint32_t s, const char *want) {
 /* key: an integer id (< 0x10000) or a guest pointer to a name ("#123" means id 123). */
 static uint32_t res_lookup(uint32_t root, uint32_t dir, uint32_t key) {
     const char *name = NULL;
-    if (key >= 0x10000u) {
+    if (key >= 0x10000u && key != 0xFFFFFFFFu) {   /* 0xFFFFFFFF: any (the first entry) */
         name = (const char *)rc_ptr(key);
         if (name[0] == '#') { key = (uint32_t)atoi(name + 1); name = NULL; }
     }

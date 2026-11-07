@@ -110,7 +110,45 @@ entry is a tail call. The exe has no relocations: its seeds come from the entry 
 * `rc_invoke()` calls a guest function with arguments (used by tests and by host code
   calling back into the guest: WndProcs, thread entry points, callbacks).
 
-## 3. Legal boundary
+## 3. The Win32 layer (`win32/`)
+
+Windows is the only target, so the layer **forwards to the host Windows** whatever only
+computes or works on memory, and **emulates** whatever depends on 32-bit pointers, on the
+process layout or on the presentation:
+
+| forwarded to the host | emulated |
+|---|---|
+| strings and locale (`MultiByteToWideChar`, `LCMapString`, `lstr*`, `GetStringType`...) | guest heap (`HeapAlloc`...) and virtual memory, in guest memory |
+| GDI drawing: DCs, pens, brushes, fonts, palettes, blits, EMF, text | DIB sections: pixels in guest memory (below) |
+| `mmio*` (the `.rrs` archives), `midiOut*` (the host MIDI synthesizer), `joy*` | modules, `LoadLibrary`/`GetProcAddress`, resources (read from the guest images) |
+| files (`FindFirstFile`, `GetFullPathName`...), time and date formatting | threads (one guest CPU, stack and TEB per host thread), kernel handles |
+| | windows, message queue and input (SDL2 window of rapture-engine) |
+| | DirectSound (SDL2 audio mixer), DirectDraw (no-op mode change), MCIWnd (`platform::Movie`) |
+| | registry (an `.ini` file, same format as rapture-engine's `RegKey`) |
+
+* **Guest memory is a section.** The 4 GiB guest space is a pagefile-backed section mapped
+  once; `CreateDIBSection` is called with that section and `offset = guest address`, so
+  GDI draws straight into guest memory and the guest's own pixel code (moses blits RLE
+  sprites itself) works on the same bytes. Every GDI call is followed by `GdiFlush`.
+* **Handles.** GDI and USER handles are 32-bit significant on 64-bit Windows and pass
+  through; kernel handles get never-reused guest numbers (the games wait on and close
+  handles of objects they already closed); pointer-sized handles (`HMMIO`, `HMIDIOUT`) go
+  through tables.
+* **The screen** is a host memory DC on a 640x480 32-bit DIB; drawing on it marks it dirty
+  and the message pump copies it to `platform::Window`'s framebuffer (scaled, F11 / Alt+Enter
+  fullscreen).
+* **Faithful to Windows, not to the hand port.** Where the games depend on undocumented
+  Windows behaviour the layer reproduces it: freed heap blocks stay intact for a while
+  (quarantine), closed handles fail, `GetVersion` reports Windows XP. One function of each
+  module's static CRT is replaced through the config (`[replace.<module>]`): the VC6
+  small-block allocator, so that every allocation reaches that heap (Aaron dispatches the
+  message queue of a scene it has just deleted).
+* **Unattended runs**: `--autoplay SCRIPT` (hidden window, scripted input, PNG shots, SDL
+  dummy audio), `W32_PCMDUMP` (audio mix to a file), `--log`, and in the runtime a crash
+  report with the guest registers and the `ebp` chain, an optional call trace
+  (`-DRECOMP_CALLTRACE=ON`, `RC_BREAK=addr`) and `RC_DUMP=addr:len`.
+
+## 4. Legal boundary
 
 * The repository: recompiler, runtime, Win32 layer, tests, configs with addresses,
   names and patches. Tests check recompiled code against known semantics (host libc,
@@ -118,6 +156,6 @@ entry is a tail call. The exe has no relocations: its seeds come from the entry 
 * Everything derived from the game (rebased images, generated C, objects, executables) is
   produced in the build directory on the user's machine and ignored by git.
 
-## 4. Status and next steps
+## 5. Status and next steps
 
 See `HANDOFF.md`.

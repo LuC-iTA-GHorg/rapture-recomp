@@ -52,6 +52,8 @@ add_library(recomp_runtime OBJECT runtime/runtime.c)
 target_include_directories(recomp_runtime PUBLIC runtime "${GEN_DIR}")
 
 # Tests (no Win32 layer: tests/hle_none.c provides an empty HLE table).
+option(RECOMP_BUILD_TESTS "Build the test programs (test_mushoot_crt needs the MuShoot config)" ON)
+if(RECOMP_BUILD_TESTS)
 add_executable(test_mushoot_crt tests/test_mushoot_crt.c tests/hle_none.c
                $<TARGET_OBJECTS:game_gen> $<TARGET_OBJECTS:recomp_runtime>)
 target_include_directories(test_mushoot_crt PRIVATE runtime)
@@ -62,6 +64,7 @@ add_test(NAME mushoot_crt COMMAND test_mushoot_crt "${GEN_DIR}")
 add_executable(difftest tests/difftest.c tests/hle_none.c
                $<TARGET_OBJECTS:game_gen> $<TARGET_OBJECTS:recomp_runtime>)
 target_include_directories(difftest PRIVATE runtime)
+endif()
 
 if(RECOMP_BUILD_GAME)
   # rapture-engine: only its library target `rapture` is needed (platform/Window for the window).
@@ -76,10 +79,22 @@ if(RECOMP_BUILD_GAME)
   target_include_directories(${GAME_EXE} PRIVATE runtime win32 "${RAPTURE_ENGINE_DIR}")
   target_link_libraries(${GAME_EXE} PRIVATE rapture SDL2::SDL2 gdi32 winmm msimg32)
   target_compile_options(${GAME_EXE} PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wno-unused-function>)
+  # The game folder of this build: the executable falls back to it when started elsewhere.
+  file(TO_NATIVE_PATH "${GAME_DIR}" GAME_DIR_NATIVE)
+  string(REPLACE "\\" "\\\\" GAME_DIR_C "${GAME_DIR_NATIVE}")
+  set_source_files_properties(win32/main.c PROPERTIES COMPILE_DEFINITIONS "RC_BUILD_GAME_DIR=\"${GAME_DIR_C}\"")
   if(MINGW)
     target_link_options(${GAME_EXE} PRIVATE -static-libgcc -static-libstdc++)
   endif()
   # The rebased images are in build/gen, next to the executable (the default --gen).
+  # SDL2.dll and the thread runtime DLL of the MinGW toolchain (if it has one) go next to it.
+  get_filename_component(CC_DIR "${CMAKE_C_COMPILER}" DIRECTORY)
+  set(RUNTIME_DLLS "$<TARGET_FILE:SDL2::SDL2>")
+  foreach(dll libmcfgthread-2.dll libmcfgthread-1.dll libwinpthread-1.dll)
+    if(EXISTS "${CC_DIR}/${dll}")
+      list(APPEND RUNTIME_DLLS "${CC_DIR}/${dll}")
+    endif()
+  endforeach()
   add_custom_command(TARGET ${GAME_EXE} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:SDL2::SDL2>" "$<TARGET_FILE_DIR:${GAME_EXE}>/")
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${RUNTIME_DLLS} "$<TARGET_FILE_DIR:${GAME_EXE}>/")
 endif()
