@@ -209,6 +209,9 @@ build\mushoot.exe --autoplay script.txt --outdir OUT [--fast 4] [--settings OUT\
   `--outdir` (resolved before the program enters the game folder).
 * Script commands: `wait ms`, `move/click/rclick/down/up x y`, `key name`, `shot name`, `quit`.
   With `--fast N` game time runs N times faster but audio (speech, movies) stays real time.
+* `--show` (with `--autoplay`): the run is shown in a normal window, with sound and MIDI; real
+  input is still ignored except closing the window (ends the run cleanly) and F11 / Alt+Enter.
+  Meant for watching a run; the checks stay the hidden runs.
 * Debugging a crash: rebuild with `-DRECOMP_CALLTRACE=ON`; the fault report shows the ebp chain;
   `RC_BREAK=<guest addr>` prints the call stack whenever that function is entered. A local,
   private script maps guest addresses to the Ghidra function names (not in this repo).

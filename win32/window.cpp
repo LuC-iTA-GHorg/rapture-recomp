@@ -4,6 +4,9 @@
 //
 // Options (parsed by w32_host_parse_args):
 //   --autoplay SCRIPT   hidden window, real input ignored, events come from SCRIPT
+//   --show              with --autoplay: the window is shown (and sound plays) so the run can be
+//                       watched; real input is still ignored, except closing the window (ends
+//                       the run) and F11 / Alt+Enter (fullscreen)
 //   --outdir DIR        where `shot` writes its PNG files (default .)
 //   --fast N            the game clock runs N times faster (timeGetTime, waits)
 //   --fullscreen        start in desktop fullscreen
@@ -44,6 +47,7 @@ struct Cmd { std::string op, s; int a = 0, b = 0, line = 0; int x1 = 0, y1 = 0, 
 std::vector<Cmd> g_script;
 size_t g_pc = 0;
 bool g_scripted = false;
+bool g_show = false;   // --show: scripted run in a visible window
 uint32_t g_wait_until = 0;
 int g_mx = 320, g_my = 240;
 struct Pending { w32_host_event e; uint32_t due; };
@@ -227,8 +231,9 @@ extern "C" int w32_host_parse_args(int argc, char** argv) {
         } else if (a == "--outdir" && i + 1 < argc) { char full[1024]; g_outdir = _fullpath(full, argv[++i], sizeof full) ? full : argv[i]; }
         else if (a == "--fast" && i + 1 < argc) fast = std::atof(argv[++i]);
         else if (a == "--fullscreen") g_fullscreen = true;
+        else if (a == "--show") g_show = true;
     }
-    if (g_scripted) {
+    if (g_scripted && !g_show) {
         Window::SetScriptedMode(true);
         SDL_setenv("SDL_AUDIODRIVER", "dummy", 1);
     }
@@ -247,7 +252,14 @@ extern "C" int w32_host_poll(w32_host_event* ev) {
     if (!g_open && !g_scripted) return 0;
     if (g_scripted) {
         InputEvent drop;
-        if (g_open) while (g_win.PollEvent(drop)) {}   // keep SDL alive; real input is ignored
+        if (g_open) while (g_win.PollEvent(drop)) {    // keep SDL alive; real input is ignored
+            if (drop.type == InputEvent::kQuit) {        // --show: closing the window ends the run
+                g_pending.clear();
+                Push(W32_EV_QUIT, 0, 0, 0, 0);
+                g_pc = g_script.size();
+                g_wait_until = 0xFFFFFFFFu;
+            }
+        }
         if (g_pending.empty()) RunScript();
         if (g_pending.empty() || g_pending.front().due > Window::Ticks()) return 0;
         *ev = g_pending.front().e;
@@ -348,3 +360,4 @@ extern "C" void w32_host_set_cursor_shape(uint32_t hcursor) {
 }
 extern "C" uint32_t w32_host_ticks(void) { return Window::Ticks(); }
 extern "C" int w32_host_scripted(void) { return g_scripted; }
+extern "C" int w32_host_silent(void) { return g_scripted && !g_show; }   // no sound: hidden autoplay

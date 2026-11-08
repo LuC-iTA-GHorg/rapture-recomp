@@ -35,7 +35,8 @@ build\mushoot.exe
 `GAME_DIR` is the folder with `Shoot.exe`, `Shoot.dll`, `moses.dll`, `Aaron.dll` and the data
 files. The executable runs in that folder (it goes there by itself, or `--game-dir DIR`).
 Options: `--fullscreen`, `--settings FILE.ini`, `--autoplay SCRIPT --outdir DIR [--fast N]`
-(unattended run with a hidden window, see `win32/window.cpp`), `--log`.
+(unattended run with a hidden window, see `win32/window.cpp`; add `--show` to watch it in a
+visible window with sound), `--log`.
 
 Tests: `build\test_threads` (guest threads through the Win32 layer), `build\test_mushoot_crt build\gen`;
 `python tools/difftest.py configs/mushoot.toml --game-dir DIR --gen build/gen --runner build/difftest.exe`.

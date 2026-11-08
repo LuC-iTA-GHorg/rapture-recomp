@@ -6,6 +6,7 @@
 #include <mmsystem.h>
 
 int w32_host_scripted(void);
+int w32_host_silent(void);
 
 /* Host handles that are pointers on 64-bit Windows (HMMIO, HMIDIOUT) go
    through a small table; guest handles are 0x00B00000 + 4 * index. */
@@ -52,7 +53,7 @@ static void m_midiOutGetDevCapsA(CPU *c) {
 static void m_midiOutOpen(CPU *c) {
     uint32_t out = ARG(0), dev = ARG(1), flags = ARG(4);
     if ((flags & CALLBACK_TYPEMASK) != CALLBACK_NULL) W32_LOG("midiOutOpen: callback type %08x ignored", flags);
-    if (w32_host_scripted()) { wr32(out, ht_put((void *)1)); RET(5, MMSYSERR_NOERROR); }   /* silent */
+    if (w32_host_silent()) { wr32(out, ht_put((void *)1)); RET(5, MMSYSERR_NOERROR); }   /* silent */
     HMIDIOUT h = NULL;
     MMRESULT r = midiOutOpen(&h, (UINT)(int32_t)dev, 0, 0, CALLBACK_NULL);
     if (r == MMSYSERR_NOERROR) wr32(out, ht_put(h));
