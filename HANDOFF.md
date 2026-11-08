@@ -176,6 +176,11 @@ exits with 0, and the last shots show the expected screen (credits; Flounder: "P
 `flounder_full.txt` steers Sebastian by holding keys, so it depends on the frame rate: run it
 alone (with other games or a build running at the same time Sebastian missed Flounder once and
 the run ended on level 1 with 0 points). A good run saves 1500 points, level 2.
+Even alone it is not fully repeatable: speech and sounds run in real time and shift the
+timing a little. On 2026-11-08, 8 runs (same build or builds that differ only in resources):
+4 x 1500, 1 x 2170, 1 x 1750 without initials (game over came after the typing), 2 x missed
+Flounder. So check the saved high score (score > 0, level >= 2, initials set), not only the
+shots, and run it again when it differs.
 
 ## How to work on it
 ```
