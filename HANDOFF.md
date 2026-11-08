@@ -123,6 +123,12 @@ ddraw (mode change no-op), dsound.c (DirectSound on SDL audio), movie.cpp (MCIWn
 platform::Movie), window.cpp (platform::Window + `--autoplay` scripts, PNG shots),
 module.c (images, DllMain order, LoadLibrary/GetProcAddress, resources).
 
+Executable resources (CMakeLists.txt, rapture-engine's `rapture_add_win32_resources`): icon
+extracted at configure time from the user's original exe (the first module of the config),
+VERSIONINFO ("Disney's <title> - Hot Shot (unofficial recompiled port)", title from the
+config) and a manifest (asInvoker, Vista..11, DPI unaware as before). Without the original exe
+the game builds without icon.
+
 Mouse moves are merged as in Windows: a WM_MOUSEMOVE still at the end of the queue takes the
 new position instead of a new message being queued, and SDL moves within the same 640x480
 pixel are dropped. Before, every SDL motion event queued WM_SETCURSOR + WM_MOUSEMOVE; the

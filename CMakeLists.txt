@@ -86,6 +86,24 @@ if(RECOMP_BUILD_GAME)
   if(MINGW)
     target_link_options(${GAME_EXE} PRIVATE -static-libgcc -static-libstdc++)
   endif()
+  # Icon, version info and manifest (rapture-engine's rapture_add_win32_resources): the icon
+  # is extracted at configure time from the user's own original exe (the first module of the
+  # config), so no icon is stored in this repository; without it the game builds without icon.
+  file(READ "${GAME_CONFIG}" GAME_CONFIG_TEXT)
+  string(REGEX MATCH "\ntitle *= *\"([^\"]*)\"" _m "\n${GAME_CONFIG_TEXT}")
+  set(GAME_TITLE "${CMAKE_MATCH_1}")
+  string(REGEX MATCH "\nfile *= *\"([^\"]*)\"" _m "\n${GAME_CONFIG_TEXT}")
+  set(GAME_ORIGINAL_EXE "${CMAKE_MATCH_1}")
+  if(NOT GAME_TITLE)
+    set(GAME_TITLE "${GAME_EXE}")
+  endif()
+  rapture_add_win32_resources(${GAME_EXE}
+    ICON_FROM "${GAME_DIR}/${GAME_ORIGINAL_EXE}"
+    VERSION 1.0.0
+    PRODUCT "Disney's ${GAME_TITLE} - Hot Shot (unofficial recompiled port)"
+    DESCRIPTION "Disney's ${GAME_TITLE} - unofficial port, static recompilation on SDL2"
+    INTERNAL_NAME "${GAME_TITLE}"
+    FILENAME "${GAME_EXE}.exe")
   # The rebased images are in build/gen, next to the executable (the default --gen).
   # SDL2.dll and the thread runtime DLL of the MinGW toolchain (if it has one) go next to it.
   get_filename_component(CC_DIR "${CMAKE_C_COMPILER}" DIRECTORY)
