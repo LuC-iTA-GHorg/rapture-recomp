@@ -2,16 +2,25 @@
 # intro movies -> title -> New game OK -> F4 twice (+60 s, needs the FKeys cheat:
 # start with tests/autoplay/flounder_settings.ini) -> swim to Flounder (level 1
 # complete) -> level 2, lives lost to timeouts -> game over -> initials -> OK ->
-# high-score table -> OK -> "Play again?".
+# high-score table -> OK -> "Play again?". A good run saves 1500 points, level 2.
 #   copy tests\autoplay\flounder_settings.ini OUT\s.ini
 #   build\flounder.exe --autoplay tests\autoplay\flounder_full.txt --outdir OUT --settings OUT\s.ini --fast 4
 # Waits are game milliseconds (movies and speech run in real time). The settings
 # file is rewritten by the game: copy the seed again before every run.
+#
+# Sebastian's moves are timed key holds: the game moves him by game time, so they
+# are repeatable (four of them end against a wall, which absorbs small differences).
+# Two points are synchronised with the screen (waitpix) because the time they take
+# varies: the start of level 1 (Sebastian appears, then takes input about 5.7 s
+# later) and the name entry after game over, which used to come after the
+# initials had already been typed in some runs.
 wait 40000
 key space
 wait 120000
 click 176 350
-wait 6000
+# level 1: Sebastian (red ce3131) appears at his start
+waitpix 130 255 180 280 ce3131 8 30000
+wait 5650
 key f4
 key f4
 keydown right
@@ -99,6 +108,8 @@ wait 10000
 shot r23
 wait 10000
 shot r24
+# name entry: the green frame around the letter A
+waitpix 116 146 172 200 7bff5a 16 120000
 key space
 key right
 key space

@@ -13,13 +13,20 @@
 //   key NAME (space esc enter tab backspace up down left right shift ctrl alt f1..f12 a..z 0..9)
 //   keydown NAME | keyup NAME (hold a key, e.g. to steer: GetKeyState sees it held)
 //   shot NAME (writes OUTDIR/NAME.png) | quit
+//   waitpix X0 Y0 X1 Y1 RRGGBB TOL TIMEOUT
+//     waits until some pixel of the screen in the rectangle X0..X1, Y0..Y1 (inclusive) is
+//     within TOL of the colour RRGGBB on every channel, for at most TIMEOUT game ms; then
+//     the script goes on (a timeout is reported on stderr). Use it where a fixed wait drifts,
+//     e.g. to wait for a dialog; keys held with keydown stay held meanwhile.
 #include "w32.h"
 
 #include "platform/Window.h"
 
 #include <SDL.h>
 
+#include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <sstream>
@@ -33,7 +40,7 @@ bool g_open = false;
 bool g_fullscreen = false;
 std::string g_outdir = ".";
 
-struct Cmd { std::string op, s; int a = 0, b = 0, line = 0; };
+struct Cmd { std::string op, s; int a = 0, b = 0, line = 0; int x1 = 0, y1 = 0, tol = 0, timeout = 0; uint32_t rgb = 0; };
 std::vector<Cmd> g_script;
 size_t g_pc = 0;
 bool g_scripted = false;
@@ -69,6 +76,14 @@ bool LoadScript(const char* path) {
         c.line = ln;
         if (!(ss >> c.op)) continue;
         if (c.op == "key" || c.op == "keydown" || c.op == "keyup" || c.op == "shot") ss >> c.s;
+        else if (c.op == "waitpix") {
+            std::string hex;
+            if (!(ss >> c.a >> c.b >> c.x1 >> c.y1 >> hex >> c.tol >> c.timeout) || hex.size() != 6) {
+                std::fprintf(stderr, "autoplay: line %d: waitpix X0 Y0 X1 Y1 RRGGBB TOL TIMEOUT\n", ln);
+                return false;
+            }
+            c.rgb = uint32_t(std::strtoul(hex.c_str(), nullptr, 16));
+        }
         else ss >> c.a >> c.b;
         if ((c.op == "key" || c.op == "keydown" || c.op == "keyup") && !KeyFromName(c.s)) { std::fprintf(stderr, "autoplay: line %d: unknown key %s\n", ln, c.s.c_str()); return false; }
         g_script.push_back(c);
@@ -131,6 +146,24 @@ bool WritePng(const std::string& path, Surface& s) {
     return true;
 }
 
+// True when some pixel of the framebuffer in the command's rectangle matches its colour.
+bool PixelMatch(const Cmd& c) {
+    Surface& fb = g_win.Framebuffer();
+    const int x0 = std::max(0, c.a), y0 = std::max(0, c.b);
+    const int x1 = std::min(Window::kWidth - 1, c.x1), y1 = std::min(Window::kHeight - 1, c.y1);
+    const int r = int(c.rgb >> 16) & 255, g = int(c.rgb >> 8) & 255, b = int(c.rgb) & 255;
+    for (int y = y0; y <= y1; ++y) {
+        const uint32_t* row = fb.Row(y);
+        for (int x = x0; x <= x1; ++x) {
+            const int pr = int(row[x] >> 16) & 255, pg = int(row[x] >> 8) & 255, pb = int(row[x]) & 255;
+            if (std::abs(pr - r) <= c.tol && std::abs(pg - g) <= c.tol && std::abs(pb - b) <= c.tol) return true;
+        }
+    }
+    return false;
+}
+size_t g_waitpix_pc = size_t(-1);   // the waitpix being waited on, and since when
+uint32_t g_waitpix_since = 0;
+
 // Runs script commands until one has to wait.
 void RunScript() {
     uint32_t now = Window::Ticks();
@@ -138,6 +171,21 @@ void RunScript() {
         const Cmd& c = g_script[g_pc++];
         const int settle = 60;
         if (c.op == "wait") g_wait_until = now + uint32_t(c.a);
+        else if (c.op == "waitpix") {
+            const size_t pc = g_pc - 1;
+            if (g_waitpix_pc != pc) { g_waitpix_pc = pc; g_waitpix_since = now; }
+            const uint32_t waited = now - g_waitpix_since;
+            if (PixelMatch(c)) {
+                std::printf("autoplay: %u ms waitpix line %d matched after %u ms\n", now, c.line, waited);
+                std::fflush(stdout);
+            } else if (waited >= uint32_t(c.timeout)) {
+                std::fprintf(stderr, "autoplay: %u ms waitpix line %d timed out after %u ms\n", now, c.line, waited);
+            } else {
+                g_pc = pc;   // look again at the next poll
+                break;
+            }
+            g_waitpix_pc = size_t(-1);
+        }
         else if (c.op == "move") { g_mx = c.a; g_my = c.b; Push(W32_EV_MOUSEMOVE, c.a, c.b, 0, 0); g_wait_until = now + settle; }
         else if (c.op == "click" || c.op == "rclick") {
             int btn = c.op == "click" ? 1 : 3;

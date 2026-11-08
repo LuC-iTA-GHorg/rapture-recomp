@@ -129,6 +129,11 @@ VERSIONINFO ("Disney's <title> - Hot Shot (unofficial recompiled port)", title f
 config) and a manifest (asInvoker, Vista..11, DPI unaware as before). Without the original exe
 the game builds without icon.
 
+Autoplay command `waitpix X0 Y0 X1 Y1 RRGGBB TOL TIMEOUT` (win32/window.cpp): waits until a
+pixel in the rectangle has the colour (within TOL per channel), at most TIMEOUT game ms, then
+goes on (a timeout is reported on stderr). It synchronises a script with what is on screen
+where a fixed wait drifts (used by flounder_full.txt).
+
 Mouse moves are merged as in Windows: a WM_MOUSEMOVE still at the end of the queue takes the
 new position instead of a new message being queued, and SDL moves within the same 640x480
 pixel are dropped. Before, every SDL motion event queued WM_SETCURSOR + WM_MOUSEMOVE; the
@@ -176,11 +181,20 @@ exits with 0, and the last shots show the expected screen (credits; Flounder: "P
 `flounder_full.txt` steers Sebastian by holding keys, so it depends on the frame rate: run it
 alone (with other games or a build running at the same time Sebastian missed Flounder once and
 the run ended on level 1 with 0 points). A good run saves 1500 points, level 2.
-Even alone it is not fully repeatable: speech and sounds run in real time and shift the
-timing a little. On 2026-11-08, 8 runs (same build or builds that differ only in resources):
-4 x 1500, 1 x 2170, 1 x 1750 without initials (game over came after the typing), 2 x missed
-Flounder. So check the saved high score (score > 0, level >= 2, initials set), not only the
-shots, and run it again when it differs.
+Investigated on 2026-11-08 (screens and Sebastian's position after every leg, 25 runs):
+* The game moves Sebastian by game time, not per frame (the same leg takes 99..107 frames
+  and ends on the same pixel), and four legs end against a wall; the timed holds are
+  repeatable: level 1 was completed in 22 of 23 runs of the old script.
+* The initials were typed at a fixed time; game over sometimes came later (a run saved
+  1750 points without initials). Now `waitpix` waits for the name entry (green frame
+  around A). The start of level 1 is also synchronised on Sebastian appearing.
+* Closed-loop steering with `waitpix` on Sebastian's position was tried and dropped: his
+  sprite changes size with the animation (about 10 px), and stopping 3 px higher on the
+  floor sends him over the clam instead of into it.
+* With the synchronised script: 9 of 10 runs saved 1500 points, level 2, initials set.
+  The other run lost its way inside level 1 (1000 points, level 1), most likely pushed by
+  a jellyfish (they move at random). So judge a run by the saved high score (score > 0,
+  level >= 2, initials set), not only by the shots, and run it again when it differs.
 
 ## How to work on it
 ```
